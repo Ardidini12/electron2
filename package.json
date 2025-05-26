@@ -1,0 +1,52 @@
+{
+  "name": "bss-sender",
+  "version": "1.0.0",
+  "description": "Bulk WhatsApp Sender Desktop Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --trace-warnings --inspect=5858",
+    "debug": "electron . --debug --inspect=9229 --enable-logging",
+    "build": "electron-builder",
+    "pack": "electron-builder --dir"
+  },
+  "keywords": [
+    "whatsapp",
+    "bulk",
+    "sender",
+    "electron"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cron": "^2.4.4",
+    "csv-parser": "^3.2.0",
+    "electron-store": "^8.2.0",
+    "moment": "^2.30.1",
+    "qrcode": "^1.5.4",
+    "sequelize": "^6.37.7",
+    "sqlite3": "^5.1.7",
+    "whatsapp-web.js": "^1.28.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "electron": "^25.9.8",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.bss.sender",
+    "productName": "BSS Sender",
+    "directories": {
+      "output": "build"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BSS Sender - WhatsApp Bulk Message Sender</title>
+  
+  <!-- Preload essential scripts to improve loading speed -->
+  <script src="js/esm-wrapper.js"></script>
+  
+  <!-- Add loading indicator styles -->
+  <style>
+    #app-loading {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #1a1a2e;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+    .loader {
+      border: 5px solid #f3f3f3;
+      border-top: 5px solid #4CAF50;
+      border-radius: 50%;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .loading-text {
+      font-size: 18px;
+      margin-top: 10px;
+    }
+    .app-container {
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    .app-container.loaded {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <!-- Loading indicator -->
+  <div id="app-loading">
+    <div class="loader"></div>
+    <h2>BSS Sender</h2>
+    <p class="loading-text">Loading application...</p>
+    <p id="loading-status">Initializing...</p>
+  </div>
+
+  <div class="app-container">
+    <!-- Sidebar Navigation -->
+    <div class="sidebar">
+      <div class="logo">
+        <h2>BSS Sender</h2>
+        <button id="reload-app" title="Reload Application" style="background: none; border: none; color: #fff; cursor: pointer; font-size: 16px; margin-left: 10px; padding: 5px; border-radius: 50%; transition: background-color 0.3s;">
+          <i class="fas fa-sync-alt"></i>
+        </button>
+      </div>
+      <ul class="nav-menu">
+        <li class="nav-item active" data-target="dashboard">
+          <i class="fas fa-tachometer-alt"></i>
+          <span>Dashboard</span>
+        </li>
+        <li class="nav-item" data-target="contacts">
+          <i class="fas fa-address-book"></i>
+          <span>Contacts</span>
+        </li>
+        <li class="nav-item" data-target="templates">
+          <i class="fas fa-file-alt"></i>
+          <span>Templates</span>
+        </li>
+        <li class="nav-item" data-target="bulk-sender">
+          <i class="fas fa-paper-plane"></i>
+          <span>Bulk Sender</span>
+        </li>
+        <li class="nav-item" data-target="scheduled">
+          <i class="fas fa-calendar-alt"></i>
+          <span>Scheduled</span>
+        </li>
+        <li class="nav-item" data-target="settings">
+          <i class="fas fa-cog"></i>
+          <span>Settings</span>
+        </li>
+      </ul>
+      <div class="whatsapp-status">
+        <div class="status-indicator disconnected"></div>
+        <span class="status-text">WhatsApp: <span id="whatsapp-status">DISCONNECTED</span></span>
+        <div id="phone-info" class="phone-info" style="display: none;">
+          <img id="connected-profile-pic" class="profile-pic" src="" alt="Profile" style="display: none;">
+          <div>
+            <div id="connected-phone-name">Unknown</div>
+            <div id="connected-phone-number">Unknown</div>
+          </div>
+        </div>
+        <div class="whatsapp-buttons">
+          <button id="connect-whatsapp" class="connect-btn"><i class="fas fa-plug"></i> Connect WhatsApp</button>
+          <button id="disconnect-whatsapp" class="disconnect-btn" style="display: none;"><i class="fas fa-unlink"></i> Disconnect</button>
+          <button id="delete-session" class="delete-btn" style="display: none;"><i class="fas fa-trash"></i> Delete Session</button>
+        </div>
+        <!-- QR code container -->
+        <div id="qr-container" class="qr-container" style="display: none;">
+          <p>Scan this QR code with WhatsApp on your phone</p>
+          <canvas id="qr-canvas" width="256" height="256"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="main-content">
+      <!-- Dashboard Section -->
+      <section id="dashboard" class="content-section active">
+        <h1>Dashboard</h1>
+        <div class="dashboard-cards">
+          <div class="card">
+            <div class="card-icon">
+              <i class="fas fa-address-book"></i>
+            </div>
+            <div class="card-content">
+              <h3>Total Contacts</h3>
+              <p id="total-contacts">0</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-icon">
+              <i class="fas fa-file-alt"></i>
+            </div>
+            <div class="card-content">
+              <h3>Templates</h3>
+              <p id="total-templates">0</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-icon">
+              <i class="fas fa-paper-plane"></i>
+            </div>
+            <div class="card-content">
+              <h3>Messages Sent</h3>
+              <p id="total-sent">0</p>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-icon">
+              <i class="fas fa-calendar-alt"></i>
+            </div>
+            <div class="card-content">
+              <h3>Scheduled</h3>
+              <p id="total-scheduled">0</p>
+            </div>
+          </div>
+        </div>
+        <div class="dashboard-charts">
+          <div class="chart-container">
+            <h3>Recent Activity</h3>
+            <div class="activity-list" id="recent-activity">
+              <!-- Activity items will be added dynamically -->
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Contacts Section -->
+      <section id="contacts" class="content-section">
+        <h1>Contact Management</h1>
+        <div class="action-bar">
+          <button id="add-contact" class="primary-btn">
+            <i class="fas fa-plus"></i> Add Contact
+          </button>
+          <button id="import-contacts" class="secondary-btn">
+            <i class="fas fa-file-import"></i> Import Contacts
+          </button>
+          <button id="delete-selected-contacts" class="danger-btn" disabled>
+            <i class="fas fa-trash"></i> Delete Selected
+          </button>
+          <div class="search-container">
+            <input type="text" id="contact-search" placeholder="Search contacts...">
+            <button id="search-btn">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="contacts-table-container">
+          <table class="data-table" id="contacts-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="select-all-contacts"></th>
+                <th>Name</th>
+                <th>Surname</th>
+                <th>Phone Number</th>
+                <th>Email</th>
+                <th>Source</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Contact rows will be added dynamically -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Contact Modal -->
+        <div id="contact-modal" class="modal">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 id="contact-modal-title">Add Contact</h2>
+              <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+              <form id="contact-form">
+                <input type="hidden" id="contact-id">
+                <div class="form-group">
+                  <label for="contact-name">Name:</label>
+                  <input type="text" id="contact-name" placeholder="First Name">
+                </div>
+                <div class="form-group">
+                  <label for="contact-surname">Surname:</label>
+                  <input type="text" id="contact-surname" placeholder="Last Name">
+                </div>
+                <div class="form-group">
+                  <label for="contact-phone">Phone Number: <span class="required">*</span></label>
+                  <input type="text" id="contact-phone" placeholder="+1234567890" required>
+                  <small>International format with country code, e.g., +1234567890</small>
+                  <div id="phone-error" class="error-message" style="display: none; color: red; font-size: 12px; margin-top: 5px;"></div>
+                </div>
+                <div class="form-group">
+                  <label for="contact-email">Email:</label>
+                  <input type="email" id="contact-email" placeholder="email@example.com">
+                </div>
+                <div class="form-group">
+                  <label for="contact-birthday">Birthday:</label>
+                  <input type="date" id="contact-birthday">
+                </div>
+                <div class="form-group">
+                  <label for="contact-source">Source:</label>
+                  <input type="text" id="contact-source" readonly>
+                </div>
+                <div class="form-group">
+                  <label for="contact-notes">Notes:</label>
+                  <textarea id="contact-notes" rows="3"></textarea>
+                </div>
+              </form>
+            </div>
+            <div class="modal-footer">
+              <button id="save-contact" class="primary-btn">Save</button>
+              <button class="secondary-btn close-modal">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import Modal -->
+        <div id="import-modal" class="modal">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2>Import Contacts</h2>
+              <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+              <form id="import-form">
+                <div class="form-group">
+                  <label for="import-file">Select File:</label>
+                  <div class="file-input-container">
+                    <input type="text" id="import-file-path" readonly placeholder="No file selected">
+                    <button type="button" id="browse-file" class="secondary-btn">Browse</button>
+                  </div>
+                  <small>Supported formats: JSON, CSV, Excel (.xlsx, .xls)</small>
+                </div>
+                <div class="form-group" id="import-progress-container" style="display: none;">
+                  <label>Import Progress:</label>
+                  <div class="progress-bar-container">
+                    <div class="progress-bar" id="import-progress"></div>
+                  </div>
+                  <div class="progress-stats">
+                    <span id="import-progress-text">0%</span>
+                    <span id="import-stats"></span>
+                  </div>
+                </div>
+              </form>
+            </div>
+            <div class="modal-footer">
+              <button id="start-import" class="primary-btn">Next: Preview Contacts</button>
+              <button class="secondary-btn close-modal">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Import Preview Modal -->
+        <div id="import-preview-modal" class="modal">
+          <div class="modal-content large-modal">
+            <div class="modal-header">
+              <h2>Import Preview</h2>
+              <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+              <div class="import-stats-bar">
+                <div class="import-stat">
+                  <span class="stat-label">Total Contacts:</span>
+                  <span id="preview-total-count" class="stat-value">0</span>
+                </div>
+                <div class="import-stat">
+                  <span class="stat-label">Valid:</span>
+                  <span id="preview-valid-count" class="stat-value">0</span>
+                </div>
+                <div class="import-stat">
+                  <span class="stat-label">Duplicates:</span>
+                  <span id="preview-duplicates-count" class="stat-value">0</span>
+                </div>
+                <div class="import-stat">
+                  <span class="stat-label">Missing Phone:</span>
+                  <span id="preview-missing-count" class="stat-value">0</span>
+                </div>
+                <div class="import-stat">
+                  <span class="stat-label">Other Issues:</span>
+                  <span id="preview-issues-count" class="stat-value">0</span>
+                </div>
+              </div>
+              
+              <!-- Large Dataset Warning - will be shown dynamically for very large imports -->
+              <div id="large-dataset-warning" class="alert-warning" style="display: none; margin-bottom: 15px; padding: 10px; border-radius: 4px; background-color: #fff3cd; color: #856404; border: 1px solid #ffeeba;">
+                <i class="fas fa-exclamation-triangle" style="margin-right: 8px;"></i>
+                <strong>Large Dataset Detected:</strong> 
+                <span id="large-dataset-message">For performance reasons, only a portion of the contacts are displayed in the preview tables. All contacts will be processed during import.</span>
+              </div>
+              
+              <div class="preview-tabs">
+                <div class="tab-header">
+                  <button id="valid-tab-btn" class="preview-tab-link active" data-tab="valid-contacts-tab">Valid Contacts</button>
+                  <button id="skipped-tab-btn" class="preview-tab-link" data-tab="skipped-contacts-tab">Skipped Contacts</button>
+                </div>
+                <div class="tab-content">
+                  <div id="valid-contacts-tab" class="tab-content active">
+                    <div class="preview-controls">
+                      <button id="select-all-preview" class="secondary-btn">Select All</button>
+                      <button id="deselect-all-preview" class="secondary-btn">Deselect All</button>
+                      <button id="skip-selected-preview" class="secondary-btn" title="Skip all selected contacts">
+                        <i class="fas fa-ban"></i> Skip Selected
+                      </button>
+                      <button id="skip-duplicates-preview" class="secondary-btn" title="Skip all duplicate contacts">
+                        <i class="fas fa-filter"></i> Skip Duplicates
+                      </button>
+                      <button id="skip-all-preview" class="secondary-btn warning" title="Skip all contacts">
+                        <i class="fas fa-ban"></i> Skip All
+                      </button>
+                      <div class="search-container">
+                        <input type="text" id="preview-search" placeholder="Search contacts...">
+                      </div>
+                    </div>
+                    <div class="preview-table-container">
+                      <table class="data-table" id="preview-table">
+                        <thead>
+                          <tr>
+                            <th style="width: 40px;"><input type="checkbox" id="select-all-preview-contacts"></th>
+                            <th style="width: 15%;">Name</th>
+                            <th style="width: 15%;">Surname</th>
+                            <th style="width: 20%;">Phone Number <span class="required">*</span></th>
+                            <th style="width: 15%;">Email</th>
+                            <th style="width: 10%;">Birthday</th>
+                            <th style="width: 10%;">Source</th>
+                            <th style="width: 10%;">Status</th>
+                            <th style="width: 5%;">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody id="preview-valid-tbody">
+                          <!-- Valid contacts will be added dynamically -->
+                        </tbody>
+                      </table>
+                    </div>
+                    <div id="valid-contacts-pagination" class="pagination-container"></div>
+                  </div>
+                  <div id="skipped-contacts-tab" class="tab-content">
+                    <div class="preview-controls">
+                      <button id="move-to-valid" class="secondary-btn">Move Selected to Valid</button>
+                      <div class="search-container">
+                        <input type="text" id="skipped-search" placeholder="Search skipped contacts...">
+                      </div>
+                    </div>
+                    <div class="preview-table-container">
+                      <table class="data-table" id="skipped-table">
+                        <thead>
+                          <tr>
+                            <th style="width: 40px;"><input type="checkbox" id="select-all-skipped-contacts"></th>
+                            <th style="width: 15%;">Name</th>
+                            <th style="width: 15%;">Surname</th>
+                            <th style="width: 20%;">Phone Number <span class="required">*</span></th>
+                            <th style="width: 20%;">Email</th>
+                            <th style="width: 10%;">Birthday</th>
+                            <th style="width: 10%;">Source</th>
+                            <th style="width: 10%;">Reason</th>
+                            <th style="width: 5%;">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody id="preview-skipped-tbody">
+                          <!-- Skipped contacts will be added dynamically -->
+                        </tbody>
+                      </table>
+                    </div>
+                    <div id="skipped-contacts-pagination" class="pagination-container"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <div class="selection-summary">
+                <span id="selected-for-import-count">0</span> contacts selected for import
+              </div>
+              <button id="complete-import" class="primary-btn">Import Selected</button>
+              <button id="back-to-import" class="secondary-btn">Back</button>
+              <button class="secondary-btn close-modal">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Templates Section -->
+      <section id="templates" class="content-section">
+        <h1>Message Templates</h1>
+        <div class="action-bar">
+          <button id="add-template" class="primary-btn">
+            <i class="fas fa-plus"></i> Create Template
+          </button>
+          <div class="search-container">
+            <input type="text" id="template-search" placeholder="Search templates...">
+            <button id="template-search-btn">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="templates-container" id="templates-grid">
+          <!-- Template cards will be added dynamically -->
+        </div>
+
+        <!-- Template Modal -->
+        <div id="template-modal" class="modal">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2 id="template-modal-title">Create Template</h2>
+              <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+              <form id="template-form">
+                <input type="hidden" id="template-id">
+                <div class="form-group">
+                  <label for="template-name">Template Name:</label>
+                  <input type="text" id="template-name" placeholder="Enter template name" required>
+                </div>
+                <div class="form-group">
+                  <label for="template-content">Message Content:</label>
+                  <textarea id="template-content" rows="5" placeholder="Enter message content" required></textarea>
+                </div>
+                <div class="form-group">
+                  <label for="template-image">Attach Image (optional):</label>
+                  <div class="file-input-container">
+                    <input type="text" id="template-image-path" readonly placeholder="No image selected">
+                    <button type="button" id="browse-image" class="secondary-btn">Browse</button>
+                  </div>
+                </div>
+                <div class="form-group" id="image-preview-container" style="display: none;">
+                  <label>Image Preview:</label>
+                  <div class="image-preview">
+                    <img id="template-image-preview" src="" alt="Preview">
+                  </div>
+                </div>
+              </form>
+            </div>
+            <div class="modal-footer">
+              <button id="save-template" class="primary-btn">Save</button>
+              <button class="secondary-btn close-modal">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bulk Sender Section -->
+      <section id="bulk-sender" class="content-section">
+        <h1>Bulk Message Sender</h1>
+        <div class="bulk-sender-container">
+          <div class="sender-panel">
+            <h3>1. Select Contacts</h3>
+            <div class="contacts-selector">
+              <div class="contacts-groups" id="contact-groups">
+                <!-- Contact groups will be added dynamically -->
+              </div>
+              <div class="selected-contacts">
+                <div class="selection-stats">
+                  <span id="selected-count">0</span> contacts selected
+                </div>
+              </div>
+            </div>
+
+            <h3>2. Select Template</h3>
+            <div class="template-selector">
+              <div class="form-group">
+                <label for="selected-template">Choose Template:</label>
+                <select id="selected-template">
+                  <option value="">-- Select Template --</option>
+                  <!-- Templates will be added dynamically -->
+                </select>
+              </div>
+              <div class="template-preview" id="template-preview">
+                <div class="preview-placeholder">
+                  <i class="fas fa-file-alt"></i>
+                  <p>Select a template to preview</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="bulk-sender-actions">
+              <button id="schedule-messages" class="primary-btn">
+                <i class="fas fa-paper-plane"></i> Send Messages
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Scheduled Messages Section -->
+      <section id="scheduled" class="content-section">
+        <h1>Scheduled Messages</h1>
+        <div class="action-bar">
+          <div class="filter-container">
+            <label for="status-filter">Filter by Status:</label>
+            <select id="status-filter">
+              <option value="">All Messages</option>
+              <option value="SCHEDULED">Scheduled</option>
+              <option value="PENDING">Pending</option>
+              <option value="SENT">Sent</option>
+              <option value="DELIVERED">Delivered</option>
+              <option value="READ">Read</option>
+              <option value="FAILED">Failed</option>
+            </select>
+          </div>
+          <button id="refresh-messages" class="secondary-btn">
+            <i class="fas fa-sync-alt"></i> Refresh
+          </button>
+        </div>
+
+        <div class="messages-table-container">
+          <table class="data-table" id="messages-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Contact</th>
+                <th>Template</th>
+                <th>Scheduled Time</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <!-- Message rows will be added dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Settings Section -->
+      <section id="settings" class="content-section">
+        <h1>Settings</h1>
+        <div class="settings-container">
+          <div class="settings-card">
+            <h3>Schedule Settings</h3>
+            <form id="schedule-settings-form">
+              <div class="form-group">
+                <label>Active Days:</label>
+                <div class="days-selector">
+                  <label class="day-checkbox">
+                    <input type="checkbox" value="1" name="settings-active-days"> Mon
+                  </label>
+                  <label class="day-checkbox">
+                    <input type="checkbox" value="2" name="settings-active-days"> Tue
+                  </label>
+                  <label class="day-checkbox">
+                    <input type="checkbox" value="3" name="settings-active-days"> Wed
+                  </label>
+                  <label class="day-checkbox">
+                    <input type="checkbox" value="4" name="settings-active-days"> Thu
+                  </label>
+                  <label class="day-checkbox">
+                    <input type="checkbox" value="5" name="settings-active-days"> Fri
+                  </label>
+                  <label class="day-checkbox">
+                    <input type="checkbox" value="6" name="settings-active-days"> Sat
+                  </label>
+                  <label class="day-checkbox">
+                    <input type="checkbox" value="7" name="settings-active-days"> Sun
+                  </label>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="settings-start-time">Start Time:</label>
+                <input type="time" id="settings-start-time">
+              </div>
+              <div class="form-group">
+                <label for="settings-end-time">End Time:</label>
+                <input type="time" id="settings-end-time">
+              </div>
+              <div class="form-group">
+                <label for="settings-message-interval">Message Interval (seconds):</label>
+                <input type="number" id="settings-message-interval" min="10" value="45">
+              </div>
+              <div class="form-group">
+                <label for="settings-is-active">Enable Sending:</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="settings-is-active">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="primary-btn">Save Settings</button>
+              </div>
+            </form>
+          </div>
+          
+          <div class="settings-card">
+            <h3>WhatsApp Connection</h3>
+            <div class="whatsapp-connection-status">
+              <div class="status-display">
+                <div class="status-indicator" id="settings-whatsapp-status"></div>
+                <span id="settings-whatsapp-status-text">Disconnected</span>
+                <div class="phone-info" id="settings-phone-info" style="display: none;">
+                  <span id="settings-connected-phone"></span>
+                </div>
+              </div>
+              <div class="qr-container" id="settings-qr-container" style="display: none;">
+                <p>Scan this QR code with WhatsApp on your phone</p>
+                <div id="qr-code"></div>
+              </div>
+              <div class="connection-actions">
+                <button id="settings-connect-whatsapp" class="primary-btn">Connect WhatsApp</button>
+                <button id="settings-disconnect-whatsapp" class="secondary-btn">Disconnect</button>
+                <button id="settings-logout-whatsapp" class="secondary-btn danger-btn">Log Out</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Notification Container -->
+  <div class="notification-container" id="notification-container"></div>
+
+  <!-- Scripts -->
+  <script>
+    // Update loading status periodically
+    let loadingDots = 0;
+    const loadingStatus = document.getElementById('loading-status');
+    const loadingInterval = setInterval(() => {
+      loadingDots = (loadingDots + 1) % 4;
+      const dots = '.'.repeat(loadingDots);
+      loadingStatus.textContent = `Initializing${dots}`;
+    }, 300);
+
+    // Listen for API ready event
+    document.addEventListener('api-ready', (event) => {
+      console.log('API is ready in index.html');
+      clearInterval(loadingInterval);
+      loadingStatus.textContent = 'API Ready! Starting application...';
+    });
+
+    // Listen for API failed event
+    document.addEventListener('api-failed', (event) => {
+      console.error('API failed to initialize:', event.detail.error);
+      loadingStatus.textContent = 'API initialization failed. Please reload the app.';
+    });
+
+    // Function to show the app and hide loading screen
+    function showApp() {
+      clearInterval(loadingInterval);
+      const appContainer = document.querySelector('.app-container');
+      const loadingScreen = document.getElementById('app-loading');
+      
+      if (appContainer && loadingScreen) {
+        appContainer.classList.add('loaded');
+        setTimeout(() => {
+          loadingScreen.style.display = 'none';
+        }, 300);
+      }
+    }
+
+    // Check if API is ready or wait for it
+    window.addEventListener('DOMContentLoaded', () => {
+      console.log('DOM content loaded in index.html');
+      
+      // Set a timeout to show the app even if API isn't ready
+      const forceShowTimeout = setTimeout(() => {
+        console.log('Forcing app display after timeout');
+        showApp();
+      }, 3000);
+
+      // Function to check API availability
+      function checkApiAvailable() {
+        if (window.api) {
+          clearTimeout(forceShowTimeout);
+          console.log('API is available, showing app');
+          loadingStatus.textContent = 'API Ready! Starting application...';
+          return;
+        }
+        
+        console.log('API not yet available, waiting...');
+        setTimeout(checkApiAvailable, 50);
+      }
+      
+      // Start checking for API
+      checkApiAvailable();
+    });
+  </script>
+  
+  <!-- Load CSS after critical scripts -->
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  
+  <!-- QR Code library for WhatsApp QR code generation -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.0/build/qrcode.min.js"></script>
+  
+  <!-- Main application script -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html> 
