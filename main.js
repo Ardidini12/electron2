@@ -421,32 +421,71 @@ function setupWhatsAppEventListeners() {
   
   whatsAppService.on('message_status_change', async (statusUpdate) => {
     try {
-      console.log(`Message status change: ${statusUpdate.externalId} -> ${statusUpdate.status}`);
-      // Update the message status in the database
-      await messageController.updateMessageStatus(statusUpdate.externalId, statusUpdate.status);
+      console.log(`[MAIN] Received WhatsApp status update: ${statusUpdate.externalId} -> ${statusUpdate.status}`);
       
-      // Send the update to the renderer
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('message-status-update', {
-          externalId: statusUpdate.externalId,
-          status: statusUpdate.status,
-          timestamp: statusUpdate.timestamp
+      // Update the message status in the database
+      const updateResult = await messageController.updateMessageStatus(
+        statusUpdate.externalId, 
+        statusUpdate.status,
+        statusUpdate.timestamp
+      );
+      
+      if (!updateResult) {
+        console.warn(`Unable to update message status in database: ${statusUpdate.externalId}`);
+      }
+      
+      // Additional message data lookup for complete UI updates
+      try {
+        const { models } = require('./src/database/db');
+        const Message = models.Message;
+        const message = await Message.findOne({
+          where: { externalId: statusUpdate.externalId }
         });
+        
+        if (message) {
+          // Send the update to the renderer with complete information
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('message-status-update', {
+              id: message.id,
+              externalId: statusUpdate.externalId,
+              status: statusUpdate.status,
+              timestamp: statusUpdate.timestamp,
+              deliveredTime: message.deliveredTime,
+              readTime: message.readTime,
+              sentTime: message.sentTime
+            });
+          }
+        } else {
+          // If message not found in DB, still send the basic update
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('message-status-update', statusUpdate);
+          }
+        }
+      } catch (lookupError) {
+        console.error('Error looking up complete message data:', lookupError);
+        // Still send the basic status update if lookup fails
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('message-status-update', statusUpdate);
+        }
       }
     } catch (error) {
-      console.error('Error updating message status:', error);
+      console.error('Error processing message status update:', error);
     }
   });
   
   whatsAppService.on('message_sent', (message) => {
-    console.log(`Message sent event: ${message.externalId}`);
+    // Reduced logging for sent messages
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('message-sent', message);
     }
   });
   
   whatsAppService.on('state_change', (state) => {
-    console.log(`WhatsApp state changed: ${state}`);
+    // Only log significant state changes
+    if (state === 'CONNECTED' || state === 'DISCONNECTED') {
+      console.log(`WhatsApp state: ${state}`);
+    }
+    
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('whatsapp-state', state);
     }
@@ -1062,6 +1101,16 @@ ipcMain.handle('cancel-scheduled-message', async (event, id) => {
   } catch (error) {
     console.error('Error in cancel-scheduled-message handler:', error);
     throw error;
+  }
+});
+
+// Add new handler for deleting messages
+ipcMain.handle('delete-messages', async (event, ids) => {
+  try {
+    return await messageController.deleteMessages(ids);
+  } catch (error) {
+    console.error('Error deleting messages:', error);
+    return { success: false, error: error.message };
   }
 });
 

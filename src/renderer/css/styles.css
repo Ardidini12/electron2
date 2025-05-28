@@ -2024,4 +2024,89 @@ input[type="checkbox"] {
 .personalization-note i {
   margin-right: 8px;
   color: #ff9800;
+}
+
+/* Styles for scheduled messages checkboxes and selection */
+.selection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background-color: #f5f7fa;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.select-all-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.selected-count {
+  font-size: 0.9em;
+  color: #666;
+  font-weight: 500;
+}
+
+.message-checkbox-container {
+  margin-right: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+/* Custom checkbox styling */
+.message-checkbox {
+  cursor: pointer;
+  width: 18px;
+  height: 18px;
+  accent-color: #4a89dc;
+}
+
+.checkbox-label {
+  margin-left: 4px;
+  cursor: pointer;
+}
+
+/* Update message header layout to include checkbox */
+.message-recipient {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+/* Highlighted selected messages */
+.message-card.selected {
+  background-color: #f0f7ff;
+  border-left-color: #4a89dc;
+  box-shadow: 0 0 0 1px #4a89dc;
+}
+
+/* Style for the delete selected button */
+#delete-selected-messages {
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+#delete-selected-messages:hover {
+  background-color: #c0392b;
+}
+
+#delete-selected-messages:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
 } 

@@ -1099,6 +1099,14 @@ function insertVariableToTemplate(variable) {
   const end = textarea.selectionEnd;
   const text = textarea.value;
   
+  // Prevent double insertion by checking if the variable already exists at cursor
+  const beforeCursor = text.substring(Math.max(0, start - variable.length), start);
+  if (beforeCursor === variable) {
+    console.log('Variable already exists at cursor position, not inserting again');
+    showToast('Variable already inserted', 'warning', 1500);
+    return;
+  }
+  
   // Insert the variable at cursor position
   const newText = text.substring(0, start) + variable + text.substring(end);
   textarea.value = newText;

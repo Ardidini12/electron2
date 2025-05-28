@@ -9,6 +9,14 @@ let elements = {};
 let messages = [];
 let currentFilter = '';
 
+// Add pagination state variables
+let currentPage = 1;
+const messagesPerPage = 10;
+let totalMessages = 0;
+
+// Add a state variable to track selected messages
+let selectedMessageIds = new Set();
+
 // Status color mapping
 const statusColors = {
   'SCHEDULED': '#ffc107', // Yellow
@@ -134,18 +142,38 @@ function setupEventListeners() {
     }
   }
   
-  // Set up auto-refresh timer (every 10 seconds)
+  // Set up auto-refresh timer
+  const autoRefreshInterval = setupAutoRefresh();
+}
+
+/**
+ * Set up auto-refresh timer (every 30 seconds to catch any missed status updates)
+ */
+function setupAutoRefresh() {
   const autoRefreshInterval = setInterval(() => {
     if (document.querySelector('#scheduled.active')) {
-      console.log('Auto-refreshing scheduled messages');
-      loadScheduledMessages();
+      console.log('[AUTO-REFRESH] Refreshing scheduled messages');
+      
+      // Store current scroll position
+      const container = elements.messagesContainer;
+      const scrollPosition = container ? container.scrollTop : 0;
+      
+      // Perform refresh
+      loadScheduledMessages().then(() => {
+        // Restore scroll position after refresh
+        if (container) {
+          container.scrollTop = scrollPosition;
+        }
+      });
     }
-  }, 10000);
+  }, 30000); // 30 seconds interval
   
   // Make sure to clear interval when navigating away
   window.addEventListener('beforeunload', () => {
     clearInterval(autoRefreshInterval);
   });
+  
+  return autoRefreshInterval;
 }
 
 /**
@@ -153,15 +181,15 @@ function setupEventListeners() {
  */
 export async function loadScheduledMessages() {
   try {
-    console.log('Loading scheduled messages...');
-    
-    // Show loading state
-    elements.messagesContainer.innerHTML = `
-      <div class="loading-spinner">
-        <i class="fas fa-spinner fa-spin"></i>
-        <p>Loading scheduled messages...</p>
-      </div>
-    `;
+    // Don't clear the container here, to avoid flickering during refresh
+    if (messages.length === 0) {
+      elements.messagesContainer.innerHTML = `
+        <div class="loading-spinner">
+          <i class="fas fa-spinner fa-spin"></i>
+          <p>Loading scheduled messages...</p>
+        </div>
+      `;
+    }
     
     // Fetch messages from API
     const response = await window.api.getScheduledMessages();
@@ -243,6 +271,7 @@ function renderMessages() {
   
   // Filter messages based on the current filter
   const filteredMessages = filterMessages();
+  totalMessages = filteredMessages.length;
   
   if (filteredMessages.length === 0) {
     elements.messagesContainer.innerHTML = `
@@ -268,16 +297,44 @@ function renderMessages() {
   // Sort messages by scheduled time (newest first for better UX)
   filteredMessages.sort((a, b) => new Date(b.scheduledTime) - new Date(a.scheduledTime));
   
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredMessages.length / messagesPerPage);
+  if (currentPage > totalPages) currentPage = 1;
+  
+  const startIndex = (currentPage - 1) * messagesPerPage;
+  const endIndex = Math.min(startIndex + messagesPerPage, filteredMessages.length);
+  const paginatedMessages = filteredMessages.slice(startIndex, endIndex);
+  
   // Use DocumentFragment for better performance when adding multiple elements
   const fragment = document.createDocumentFragment();
   
-  filteredMessages.forEach(message => {
+  // Add selection header with toggle all checkbox
+  const selectionHeader = document.createElement('div');
+  selectionHeader.className = 'selection-header';
+  selectionHeader.innerHTML = `
+    <div class="select-all-container">
+      <input type="checkbox" id="select-all-messages" class="message-checkbox">
+      <label for="select-all-messages">Select All</label>
+    </div>
+    <div class="selected-count">
+      <span id="selected-count">${selectedMessageIds.size} selected</span>
+    </div>
+  `;
+  fragment.appendChild(selectionHeader);
+  
+  paginatedMessages.forEach(message => {
     // Get message timestamps
     const scheduledTime = new Date(message.scheduledTime);
-    // Use updatedAt as a substitute for sentTime
-    const sentTime = (message.status === 'SENT' || message.status === 'DELIVERED' || message.status === 'READ') 
-                    ? new Date(message.updatedAt) 
-                    : null;
+    
+    // Create more accurate timestamp tracking
+    const sentTime = message.sentTime ? new Date(message.sentTime) : 
+                  (message.status === 'SENT' || message.status === 'DELIVERED' || message.status === 'READ') ? 
+                  new Date(message.updatedAt) : null;
+    
+    // Get delivered and read times if available
+    const deliveredTime = message.deliveredTime ? new Date(message.deliveredTime) : null;
+    const readTime = message.readTime ? new Date(message.readTime) : null;
+    
     const contact = message.Contact || {};
     const template = message.Template || {};
     
@@ -330,8 +387,17 @@ function renderMessages() {
       messageCard.dataset.externalId = message.externalId;
     }
     
+    // Check if this message is selected
+    const isSelected = selectedMessageIds.has(String(message.id));
+    
     messageCard.innerHTML = `
       <div class="message-header">
+        <div class="message-checkbox-container">
+          <input type="checkbox" id="message-${message.id}" 
+            class="message-checkbox" data-id="${message.id}"
+            ${isSelected ? 'checked' : ''}>
+          <label for="message-${message.id}" class="checkbox-label"></label>
+        </div>
         <div class="message-recipient">
           <i class="fas fa-user"></i>
           <span>${contact.name || ''} ${contact.surname || ''}</span>
@@ -343,10 +409,10 @@ function renderMessages() {
         </div>
       </div>
       <div class="message-content">
-        <p>${message.contentSnapshot || 'No content'}</p>
+        <p>${message.contentSnapshot ? message.contentSnapshot.substring(0, 100) + (message.contentSnapshot.length > 100 ? '...' : '') : 'No content'}</p>
         ${message.imagePathSnapshot ? 
           `<div class="message-image">
-            <img src="file://${message.imagePathSnapshot}" alt="Message image">
+            <img src="file://${message.imagePathSnapshot}" alt="Message image" style="max-height: 60px; width: auto;">
           </div>` : ''
         }
       </div>
@@ -354,12 +420,24 @@ function renderMessages() {
         <div class="message-times">
           <div class="time-item">
             <i class="fas fa-calendar-alt"></i>
-            <span class="message-time">${scheduledTime.toLocaleDateString()} ${scheduledTime.toLocaleTimeString()}</span>
+            <span class="message-time">Scheduled: ${formatDateTime(scheduledTime)}</span>
           </div>
           ${sentTime ? 
             `<div class="time-item">
               <i class="fas fa-paper-plane"></i>
-              <span class="message-time" data-update-type="status">${sentTime.toLocaleDateString()} ${sentTime.toLocaleTimeString()}</span>
+              <span class="message-time" data-update-type="sent">Sent: ${formatDateTime(sentTime)}</span>
+            </div>` : ''
+          }
+          ${deliveredTime ? 
+            `<div class="time-item">
+              <i class="fas fa-check-double"></i>
+              <span class="message-time" data-update-type="delivered">Delivered: ${formatDateTime(deliveredTime)}</span>
+            </div>` : ''
+          }
+          ${readTime ? 
+            `<div class="time-item">
+              <i class="fas fa-eye"></i>
+              <span class="message-time" data-update-type="read">Read: ${formatDateTime(readTime)}</span>
             </div>` : ''
           }
         </div>
@@ -374,8 +452,8 @@ function renderMessages() {
               <i class="fas fa-redo"></i> Retry
             </button>` : ''
           }
-          <button class="btn btn-sm btn-info view-btn" data-id="${message.id}" title="View message details">
-            <i class="fas fa-eye"></i> View
+          <button class="btn btn-sm btn-danger delete-btn" data-id="${message.id}" title="Delete this message">
+            <i class="fas fa-trash"></i>
           </button>
         </div>
       </div>
@@ -388,6 +466,47 @@ function renderMessages() {
   // Add all cards to the container at once (more efficient)
   elements.messagesContainer.appendChild(fragment);
   
+  // Add pagination controls
+  if (totalPages > 1) {
+    const paginationControls = document.createElement('div');
+    paginationControls.className = 'pagination-controls';
+    
+    // Previous button
+    const prevButton = document.createElement('button');
+    prevButton.className = 'pagination-btn' + (currentPage === 1 ? ' disabled' : '');
+    prevButton.innerHTML = '<i class="fas fa-chevron-left"></i>';
+    prevButton.disabled = currentPage === 1;
+    prevButton.addEventListener('click', () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderMessages();
+      }
+    });
+    
+    // Next button
+    const nextButton = document.createElement('button');
+    nextButton.className = 'pagination-btn' + (currentPage === totalPages ? ' disabled' : '');
+    nextButton.innerHTML = '<i class="fas fa-chevron-right"></i>';
+    nextButton.disabled = currentPage === totalPages;
+    nextButton.addEventListener('click', () => {
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderMessages();
+      }
+    });
+    
+    // Page indicator
+    const pageIndicator = document.createElement('span');
+    pageIndicator.className = 'page-indicator';
+    pageIndicator.textContent = `Page ${currentPage} of ${totalPages}`;
+    
+    paginationControls.appendChild(prevButton);
+    paginationControls.appendChild(pageIndicator);
+    paginationControls.appendChild(nextButton);
+    
+    elements.messagesContainer.appendChild(paginationControls);
+  }
+  
   // Setup event listeners for the newly created buttons
   setupMessageCardButtons();
   
@@ -395,8 +514,11 @@ function renderMessages() {
   const counterDiv = document.createElement('div');
   counterDiv.className = 'messages-counter';
   counterDiv.innerHTML = `
-    <span>Showing ${filteredMessages.length} ${currentFilter !== 'ALL' ? currentFilter.toLowerCase() : ''} message${filteredMessages.length !== 1 ? 's' : ''}</span>
+    <span>Showing ${paginatedMessages.length} of ${filteredMessages.length} ${currentFilter !== 'ALL' ? currentFilter.toLowerCase() : ''} message${filteredMessages.length !== 1 ? 's' : ''}</span>
     ${currentFilter !== 'ALL' ? `<button id="show-all-messages" class="secondary-btn">Show All</button>` : ''}
+    <button id="delete-selected-messages" class="danger-btn" ${selectedMessageIds.size === 0 ? 'disabled' : ''}>
+      Delete Selected (${selectedMessageIds.size})
+    </button>
   `;
   
   // Insert counter at the beginning of the container
@@ -409,6 +531,154 @@ function renderMessages() {
     localStorage.setItem('scheduledMessagesFilter', 'ALL');
     renderMessages();
   });
+  
+  // Add event listener to "Delete Selected" button
+  const deleteSelectedButton = document.getElementById('delete-selected-messages');
+  if (deleteSelectedButton) {
+    deleteSelectedButton.addEventListener('click', () => {
+      if (selectedMessageIds.size === 0) {
+        showToast('No messages selected', 'warning');
+        return;
+      }
+      
+      showConfirmDialog(
+        'Delete Messages', 
+        `Are you sure you want to delete ${selectedMessageIds.size} selected message(s)?`,
+        'Delete',
+        'Cancel'
+      ).then(confirmed => {
+        if (confirmed) {
+          deleteMessages(Array.from(selectedMessageIds));
+        }
+      });
+    });
+  }
+  
+  // Add event listener to "Select All" checkbox
+  const selectAllCheckbox = document.getElementById('select-all-messages');
+  if (selectAllCheckbox) {
+    // Set the initial state based on if all displayed messages are selected
+    const allDisplayedIds = paginatedMessages.map(message => String(message.id));
+    const allDisplayedSelected = allDisplayedIds.every(id => selectedMessageIds.has(id));
+    selectAllCheckbox.checked = allDisplayedSelected && allDisplayedIds.length > 0;
+    
+    selectAllCheckbox.addEventListener('change', () => {
+      const isChecked = selectAllCheckbox.checked;
+      
+      // Get all checkboxes on the current page
+      const checkboxes = document.querySelectorAll('.message-checkbox:not(#select-all-messages)');
+      
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = isChecked;
+        const messageId = checkbox.dataset.id;
+        
+        if (isChecked) {
+          selectedMessageIds.add(String(messageId));
+          // Add selected class to message card
+          const messageCard = checkbox.closest('.message-card');
+          if (messageCard) {
+            messageCard.classList.add('selected');
+          }
+        } else {
+          selectedMessageIds.delete(String(messageId));
+          // Remove selected class from message card
+          const messageCard = checkbox.closest('.message-card');
+          if (messageCard) {
+            messageCard.classList.remove('selected');
+          }
+        }
+      });
+      
+      // Update the selected count
+      updateSelectedCount();
+      
+      // Update the delete button state
+      const deleteButton = document.getElementById('delete-selected-messages');
+      if (deleteButton) {
+        deleteButton.disabled = selectedMessageIds.size === 0;
+        deleteButton.textContent = `Delete Selected (${selectedMessageIds.size})`;
+      }
+    });
+  }
+  
+  // Set up individual checkbox event listeners
+  setupCheckboxListeners();
+}
+
+/**
+ * Update the selected messages count display
+ */
+function updateSelectedCount() {
+  const countElement = document.getElementById('selected-count');
+  if (countElement) {
+    countElement.textContent = `${selectedMessageIds.size} selected`;
+  }
+  
+  // Also update the delete button text
+  const deleteButton = document.getElementById('delete-selected-messages');
+  if (deleteButton) {
+    deleteButton.disabled = selectedMessageIds.size === 0;
+    deleteButton.textContent = `Delete Selected (${selectedMessageIds.size})`;
+  }
+}
+
+/**
+ * Set up event listeners for message checkboxes
+ */
+function setupCheckboxListeners() {
+  const checkboxes = document.querySelectorAll('.message-checkbox:not(#select-all-messages)');
+  
+  checkboxes.forEach(checkbox => {
+    checkbox.addEventListener('change', () => {
+      const messageId = checkbox.dataset.id;
+      
+      if (checkbox.checked) {
+        selectedMessageIds.add(String(messageId));
+        // Add selected class to message card
+        const messageCard = checkbox.closest('.message-card');
+        if (messageCard) {
+          messageCard.classList.add('selected');
+        }
+      } else {
+        selectedMessageIds.delete(String(messageId));
+        // Remove selected class from message card
+        const messageCard = checkbox.closest('.message-card');
+        if (messageCard) {
+          messageCard.classList.remove('selected');
+        }
+      }
+      
+      // Update the "Select All" checkbox state
+      updateSelectAllCheckbox();
+      
+      // Update the selected count
+      updateSelectedCount();
+    });
+    
+    // Also set initial selected class for already selected messages
+    const messageId = checkbox.dataset.id;
+    if (selectedMessageIds.has(String(messageId))) {
+      const messageCard = checkbox.closest('.message-card');
+      if (messageCard) {
+        messageCard.classList.add('selected');
+      }
+    }
+  });
+}
+
+/**
+ * Update the state of the "Select All" checkbox
+ */
+function updateSelectAllCheckbox() {
+  const selectAllCheckbox = document.getElementById('select-all-messages');
+  if (!selectAllCheckbox) return;
+  
+  const checkboxes = document.querySelectorAll('.message-checkbox:not(#select-all-messages)');
+  const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+  const noneChecked = Array.from(checkboxes).every(cb => !cb.checked);
+  
+  selectAllCheckbox.checked = allChecked && checkboxes.length > 0;
+  selectAllCheckbox.indeterminate = !allChecked && !noneChecked;
 }
 
 /**
@@ -417,7 +687,9 @@ function renderMessages() {
  * @returns {string} Formatted date and time
  */
 function formatDateTime(date) {
-  if (!date || isNaN(date.getTime())) return 'Invalid date';
+  if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+    return 'Invalid date';
+  }
   
   const options = {
     year: 'numeric',
@@ -746,26 +1018,59 @@ export function updateMessageStatus(update) {
     return;
   }
   
-  console.log('Message status update received:', update);
-  
-  // Find the message element by externalId
-  const messageElement = document.querySelector(`.message-card[data-external-id="${update.externalId}"]`);
+  console.log(`[UI] Received status update: ${update.externalId} -> ${update.status}`, update);
   
   // Update the status in the messages array too
   const messageIndex = messages.findIndex(m => m.externalId === update.externalId);
   if (messageIndex !== -1) {
+    // Store old status for comparison
+    const oldStatus = messages[messageIndex].status;
+    
+    // Update the status and timestamps
     messages[messageIndex].status = update.status;
     
-    // Add timestamp if provided
+    // Update timestamp based on status
     if (update.timestamp) {
+      if (update.status === 'DELIVERED' || update.deliveredTime) {
+        messages[messageIndex].deliveredTime = update.deliveredTime || update.timestamp;
+        console.log(`[UI] Set deliveredTime for message ${update.externalId} to ${new Date(messages[messageIndex].deliveredTime).toISOString()}`);
+      } 
+      
+      if (update.status === 'READ' || update.readTime) {
+        messages[messageIndex].readTime = update.readTime || update.timestamp;
+        console.log(`[UI] Set readTime for message ${update.externalId} to ${new Date(messages[messageIndex].readTime).toISOString()}`);
+      }
+      
+      if (update.status === 'SENT' || update.sentTime) {
+        messages[messageIndex].sentTime = update.sentTime || update.timestamp;
+        console.log(`[UI] Set sentTime for message ${update.externalId} to ${new Date(messages[messageIndex].sentTime).toISOString()}`);
+      }
+      
       messages[messageIndex].updatedAt = update.timestamp;
     }
+    
+    // Only log status changes
+    if (oldStatus !== update.status) {
+      console.log(`[UI] Updated message in array: ${update.externalId} status changed from ${oldStatus} to ${update.status}`);
+    }
+    
+    // Force a re-render for important status updates
+    if (['DELIVERED', 'READ'].includes(update.status)) {
+      console.log(`[UI] Important status change detected (${update.status}), refreshing display`);
+      renderMessages();
+      return;
+    }
+  } else {
+    console.log(`[UI] Message with externalId ${update.externalId} not found in local cache, will check for DOM element`);
   }
   
+  // Find the message element by externalId
+  const messageElement = document.querySelector(`.message-card[data-external-id="${update.externalId}"]`);
+  
   if (!messageElement) {
-    console.log('Message element not found for:', update.externalId);
-    // Message might not be displayed yet, refresh the view
-    renderMessages();
+    // Message might not be displayed yet, refresh the view to ensure it appears
+    console.log(`[UI] No UI element found for message ${update.externalId}, refreshing the display`);
+    loadScheduledMessages();
     return;
   }
   
@@ -774,6 +1079,7 @@ export function updateMessageStatus(update) {
   if (statusElement) {
     statusElement.textContent = update.status;
     statusElement.className = 'message-status ' + update.status.toLowerCase();
+    console.log(`[UI] Updated status text for message ${update.externalId} to ${update.status}`);
   }
   
   // Update the status icon
@@ -810,23 +1116,79 @@ export function updateMessageStatus(update) {
     statusIconElement.className = 'status-icon fas ' + iconClass;
   }
   
-  // Update timestamp if provided
-  if (update.timestamp) {
-    const timeElement = messageElement.querySelector('.message-time[data-update-type="status"]');
-    if (timeElement) {
-      const time = new Date(update.timestamp);
-      timeElement.textContent = `${time.toLocaleDateString()} ${time.toLocaleTimeString()}`;
-      timeElement.title = `Status updated at: ${time.toLocaleString()}`;
+  // Update timestamp elements based on status
+  if (update.timestamp || update.deliveredTime || update.readTime || update.sentTime) {
+    const messageTimeElements = messageElement.querySelectorAll('.message-time');
+    const messageTimesContainer = messageElement.querySelector('.message-times');
+    
+    // Handle timestamp for sent status
+    if (update.status === 'SENT' || update.sentTime) {
+      const timestamp = update.sentTime || update.timestamp;
+      const formattedTime = formatDateTime(new Date(timestamp));
+      
+      // Look for sent timestamp element or create one
+      let sentElement = messageElement.querySelector('.message-time[data-update-type="sent"]');
+      if (!sentElement && messageTimesContainer) {
+        const newTimeItem = document.createElement('div');
+        newTimeItem.className = 'time-item';
+        newTimeItem.innerHTML = `
+          <i class="fas fa-paper-plane"></i>
+          <span class="message-time" data-update-type="sent">Sent: ${formattedTime}</span>
+        `;
+        messageTimesContainer.appendChild(newTimeItem);
+      } else if (sentElement) {
+        sentElement.textContent = `Sent: ${formattedTime}`;
+      }
     }
-  }
-  
-  // If this is a final status (DELIVERED, READ, FAILED), update UI accordingly
-  if (['DELIVERED', 'READ', 'FAILED'].includes(update.status)) {
-    messageElement.classList.add('status-final');
+    
+    // Handle timestamp for delivered status
+    if (update.status === 'DELIVERED' || update.deliveredTime) {
+      const timestamp = update.deliveredTime || update.timestamp;
+      const formattedTime = formatDateTime(new Date(timestamp));
+      
+      // Look for delivered timestamp element or create one
+      let deliveredElement = messageElement.querySelector('.message-time[data-update-type="delivered"]');
+      if (!deliveredElement && messageTimesContainer) {
+        const newTimeItem = document.createElement('div');
+        newTimeItem.className = 'time-item';
+        newTimeItem.innerHTML = `
+          <i class="fas fa-check-double"></i>
+          <span class="message-time" data-update-type="delivered">Delivered: ${formattedTime}</span>
+        `;
+        messageTimesContainer.appendChild(newTimeItem);
+      } else if (deliveredElement) {
+        deliveredElement.textContent = `Delivered: ${formattedTime}`;
+      }
+    }
+    
+    // Handle timestamp for read status
+    if (update.status === 'READ' || update.readTime) {
+      const timestamp = update.readTime || update.timestamp;
+      const formattedTime = formatDateTime(new Date(timestamp));
+      
+      // Look for read timestamp element or create one
+      let readElement = messageElement.querySelector('.message-time[data-update-type="read"]');
+      if (!readElement && messageTimesContainer) {
+        const newTimeItem = document.createElement('div');
+        newTimeItem.className = 'time-item';
+        newTimeItem.innerHTML = `
+          <i class="fas fa-eye"></i>
+          <span class="message-time" data-update-type="read">Read: ${formattedTime}</span>
+        `;
+        messageTimesContainer.appendChild(newTimeItem);
+      } else if (readElement) {
+        readElement.textContent = `Read: ${formattedTime}`;
+      }
+    }
   }
   
   // Update the card class based on the new status
   messageElement.className = `message-card ${update.status.toLowerCase()}`;
+  
+  // If this is a selected message, maintain the selection
+  if (selectedMessageIds.has(String(messageElement.dataset.id))) {
+    messageElement.classList.add('selected');
+  }
 }
 
 /**
@@ -843,6 +1205,23 @@ function setupMessageCardButtons() {
   document.querySelectorAll('.retry-btn').forEach(button => {
     const messageId = button.dataset.id;
     button.addEventListener('click', () => retryMessage(messageId));
+  });
+  
+  // Delete buttons
+  document.querySelectorAll('.delete-btn').forEach(button => {
+    const messageId = button.dataset.id;
+    button.addEventListener('click', () => {
+      showConfirmDialog(
+        'Delete Message', 
+        'Are you sure you want to delete this message?',
+        'Delete',
+        'Cancel'
+      ).then(confirmed => {
+        if (confirmed) {
+          deleteMessages([messageId]);
+        }
+      });
+    });
   });
   
   // View buttons
@@ -872,13 +1251,29 @@ function setupMessageCardButtons() {
 function setupMessageStatusUpdates() {
   // Listen for message status updates from the main process
   window.api.on('message-status-update', (update) => {
-    console.log('Message status update received:', update);
+    console.log(`[STATUS LISTENER] Received message status update:`, update);
+    
+    // Apply the update to our UI
     updateMessageStatus(update);
+    
+    // For critical status changes, schedule a refresh to ensure DB consistency
+    if (['DELIVERED', 'READ'].includes(update.status)) {
+      // Use a debounced refresh to avoid too many refreshes for multiple quick updates
+      if (window.statusUpdateTimer) {
+        clearTimeout(window.statusUpdateTimer);
+      }
+      
+      window.statusUpdateTimer = setTimeout(() => {
+        console.log(`[STATUS LISTENER] Performing deferred refresh after ${update.status} status`);
+        loadScheduledMessages();
+        window.statusUpdateTimer = null;
+      }, 2000); // Wait 2 seconds after the last status update
+    }
   });
   
   // Listen for new messages being sent
   window.api.on('message-sent', (message) => {
-    console.log('Message sent notification received:', message);
+    console.log(`[MESSAGE SENT] Received new message notification:`, message);
     
     // Check if the message is already in our list
     const exists = messages.some(m => m.id === message.id);
@@ -891,10 +1286,44 @@ function setupMessageStatusUpdates() {
     } else {
       // Just update the status
       updateMessageStatus({
+        id: message.id,
         externalId: message.externalId,
         status: message.status,
-        timestamp: message.updatedAt || new Date()
+        timestamp: message.updatedAt || new Date(),
+        sentTime: message.sentTime,
+        deliveredTime: message.deliveredTime,
+        readTime: message.readTime
       });
     }
   });
+}
+
+/**
+ * Delete messages
+ * @param {Array} ids - Array of message IDs to delete
+ */
+async function deleteMessages(ids) {
+  try {
+    if (!ids || ids.length === 0) {
+      showToast('No messages selected for deletion', 'warning');
+      return;
+    }
+    
+    const result = await api.deleteMessages(ids);
+    
+    if (result && result.success) {
+      showToast(`Successfully deleted ${ids.length} message(s)`, 'success');
+      
+      // Remove deleted messages from local array
+      messages = messages.filter(message => !ids.includes(String(message.id)));
+      
+      // Refresh the view
+      renderMessages();
+    } else {
+      showToast(`Failed to delete messages: ${result.error || 'Unknown error'}`, 'error');
+    }
+  } catch (error) {
+    console.error('Error deleting messages:', error);
+    showToast(`Error: ${error.message}`, 'error');
+  }
 } 

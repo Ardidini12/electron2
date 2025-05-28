@@ -8,7 +8,8 @@
     "dev": "electron . --trace-warnings --inspect=5858",
     "debug": "electron . --debug --inspect=9229 --enable-logging",
     "build": "electron-builder",
-    "pack": "electron-builder --dir"
+    "pack": "electron-builder --dir",
+    "migrate": "node migrate.js"
   },
   "keywords": [
     "whatsapp",

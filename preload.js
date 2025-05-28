@@ -70,6 +70,7 @@ function exposeAPI() {
       cancelScheduledMessage: (id) => ipcRenderer.invoke('cancel-scheduled-message', id),
       retryMessage: (id) => ipcRenderer.invoke('retry-message', id),
       scheduleMessages: (config) => ipcRenderer.invoke('schedule-messages', config),
+      deleteMessages: (ids) => ipcRenderer.invoke('delete-messages', ids),
       
       // Settings operations
       getSettings: () => ipcRenderer.invoke('get-settings'),

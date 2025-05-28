@@ -14,7 +14,7 @@ module.exports = (sequelize) => {
     },
     status: {
       type: DataTypes.ENUM,
-      values: ['SCHEDULED', 'PENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELED'],
+      values: ['SCHEDULED', 'PENDING', 'SENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELED'],
       defaultValue: 'SCHEDULED'
     },
     scheduledTime: {
@@ -24,6 +24,20 @@ module.exports = (sequelize) => {
     sentTime: {
       type: DataTypes.DATE,
       allowNull: true
+    },
+    // Add specific timestamps for message status tracking
+    deliveredTime: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    readTime: {
+      type: DataTypes.DATE,
+      allowNull: true
+    },
+    // Track retry attempts
+    retryCount: {
+      type: DataTypes.INTEGER,
+      defaultValue: 0
     },
     failureReason: {
       type: DataTypes.TEXT,

@@ -178,6 +178,7 @@ class WhatsAppService extends EventEmitter {
         setTimeout(() => reject(new Error('Initialization timed out after 3 minutes')), 180000);
       });
       await Promise.race([initPromise, timeoutPromise]);
+      this.setupEventListeners();
       return { success: true };
     } catch (error) {
       this.status.isConnected = false;
@@ -359,8 +360,14 @@ class WhatsAppService extends EventEmitter {
    * Set up WhatsApp client event listeners
    */
   setupEventListeners() {
+    console.log('[WA DEBUG] Setting up WhatsApp event listeners');
     if (!this.client) return;
     this.client.removeAllListeners();
+
+    // Add a generic event logger for all events
+    this.client.on('all', (event, ...args) => {
+      console.log('[WA ALL EVENT]', event, ...args);
+    });
 
     // Track QR code attempts to handle reconnections properly
     let qrAttempts = 0;
@@ -500,14 +507,41 @@ class WhatsAppService extends EventEmitter {
     // Handle message ACK updates
     this.client.on('message_ack', (message, ack) => {
       if (message.fromMe) {
-        console.log(`Message ACK update - ID: ${message.id._serialized}, ACK: ${ack}`);
-        let status = 'SENT';
-        if (ack === 2) status = 'DELIVERED';
-        else if (ack === 3) status = 'READ';
+        // Log every ACK value for debugging
+        console.log(`[WA ACK] Message ${message.id._serialized} ack: ${ack}`);
         
+        // Map WhatsApp ack levels to our status values
+        let status = null;
+        if (ack === 1) {
+          status = 'SENT';
+        } else if (ack === 2) {
+          status = 'DELIVERED';
+        } else if (ack === 3) {
+          status = 'READ';
+        } else if (ack === 4) {
+          status = 'READ'; // Treat played as read for now
+        }
+        
+        if (status) {
+          this.emit('message_status_change', {
+            externalId: message.id._serialized,
+            status: status,
+            timestamp: new Date()
+          });
+          console.log(`[WA EMIT] Emitted status ${status} for message ${message.id._serialized}`);
+        }
+      }
+    });
+    
+    // Add listener for initial status after message is sent
+    this.client.on('message_create', (message) => {
+      if (message.fromMe) {
+        console.log(`[MESSAGE CREATE] New outgoing message created: ${message.id._serialized}`);
+        
+        // Emit sent status immediately when message is created
         this.emit('message_status_change', {
           externalId: message.id._serialized,
-          status: status,
+          status: 'SENT',
           timestamp: new Date()
         });
       }
@@ -918,14 +952,22 @@ class WhatsAppService extends EventEmitter {
    * @returns {string} - Formatted phone number
    */
   formatPhoneNumber(phoneNumber) {
-    // Remove any non-digit characters
-    let formatted = phoneNumber.replace(/\D/g, '');
+    // Remove any non-digit characters except the leading +
+    let formatted = phoneNumber.toString().replace(/[^\d+]/g, '');
     
-    // Ensure number has country code
-    if (!formatted.startsWith('1') && !formatted.startsWith('44') && !formatted.startsWith('91')) {
-      // Default to US country code if not specified
-      formatted = '1' + formatted;
+    // Remove leading + if present (WhatsApp Web API doesn't use + in the chat ID)
+    if (formatted.startsWith('+')) {
+      formatted = formatted.substring(1);
     }
+    
+    // If number has no country code (typically less than 10 digits or exactly 10 for some countries)
+    // we leave it as is and let the user handle country codes correctly
+    if (formatted.length <= 10) {
+      console.log(`Warning: Phone number ${formatted} appears to be missing country code`);
+    }
+    
+    // Log the formatted number for debugging
+    console.log(`Formatted phone number: ${phoneNumber} → ${formatted}`);
     
     return formatted;
   }

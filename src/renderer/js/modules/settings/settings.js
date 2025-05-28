@@ -623,7 +623,7 @@ function setupEventListeners() {
     console.log('Setting up form submission event listener');
     
     // Create a form copy without events
-    if (elements.settingsForm) {
+  if (elements.settingsForm) {
       const oldForm = elements.settingsForm;
       
       // Create a new form element
@@ -639,60 +639,116 @@ function setupEventListeners() {
       
       // Update our reference
       elements.settingsForm = newForm;
-      
+    
       // Re-cache elements after form replacement
       cacheElements();
     }
     
-    // Form submit handler
-    const handleFormSubmit = async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      console.log('Settings form submitted');
+    // Clean up any existing listeners (cleanup before adding)
+  if (elements.saveButton) {
+      console.log('Setting up save button click handler instead of form submit');
       
-      // Prevent double submission
-      if (e.target.classList.contains('saving')) {
-        console.warn('Form is already saving, ignoring submission');
-        return;
+      // Remove existing listeners (clone and replace technique)
+      const oldButton = elements.saveButton;
+      const newButton = oldButton.cloneNode(true);
+      if (oldButton.parentNode) {
+        oldButton.parentNode.replaceChild(newButton, oldButton);
       }
       
-      // Disable form immediately
-      e.target.classList.add('saving');
+      // Update our reference
+      elements.saveButton = newButton;
       
-      // Call save
-      await saveSettings();
-    };
-    
-    // Add single event listener to form
-    if (elements.settingsForm) {
-      elements.settingsForm.addEventListener('submit', handleFormSubmit);
-    }
-    
-    // WhatsApp connection buttons
-    if (elements.connectButton) {
-      elements.connectButton.addEventListener('click', connectWhatsApp);
-    }
-    
-    if (elements.disconnectButton) {
-      elements.disconnectButton.addEventListener('click', disconnectWhatsApp);
-    }
-    
-    if (elements.logoutButton) {
-      elements.logoutButton.addEventListener('click', logoutWhatsApp);
-    }
-    
-    // Disconnect WhatsApp button
-    if (elements.disconnectWhatsAppBtn) {
-      elements.disconnectWhatsAppBtn.addEventListener('click', async () => {
-        await disconnectWhatsApp();
+      // Add click event to save button instead of submit to form
+      elements.saveButton.addEventListener('click', async (e) => {
+      e.preventDefault();
+        
+        // Check if saving is already in progress
+        if (elements.saveButton.disabled || 
+            elements.saveButton.textContent === 'Saving...' ||
+            elements.settingsForm.classList.contains('saving')) {
+          console.warn('Save already in progress, ignoring click');
+          return;
+        }
+        
+        console.log('Save button clicked, initiating save');
+        
+        // Disable button immediately to prevent double-clicks
+        elements.saveButton.disabled = true;
+        elements.saveButton.textContent = 'Saving...';
+        
+        // Mark form as saving
+        elements.settingsForm.classList.add('saving');
+        
+        // Call save function
+        await saveSettings();
       });
+      
+      console.log('Save button click handler set up successfully');
+  } else {
+      console.error('Save button not found, falling back to form submit');
+      
+      // Form submit handler as fallback
+      const handleFormSubmit = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Settings form submitted');
+        
+        // Prevent double submission
+        if (e.target.classList.contains('saving')) {
+          console.warn('Form is already saving, ignoring submission');
+          return;
+        }
+        
+        // Disable form immediately
+        e.target.classList.add('saving');
+        
+        // Call save
+        await saveSettings();
+      };
+      
+      // Add single event listener to form
+      if (elements.settingsForm) {
+        // Remove existing handler by cloning
+        const oldForm = elements.settingsForm;
+        const newForm = oldForm.cloneNode(true);
+        if (oldForm.parentNode) {
+          oldForm.parentNode.replaceChild(newForm, oldForm);
+        }
+        
+        // Update reference and re-cache elements
+        elements.settingsForm = newForm;
+        cacheElements();
+        
+        // Add new handler
+        elements.settingsForm.addEventListener('submit', handleFormSubmit);
     }
-    
-    // Logout WhatsApp button
-    if (elements.logoutWhatsAppBtn) {
-      elements.logoutWhatsAppBtn.addEventListener('click', async () => {
-        await logoutWhatsApp();
-      });
+  }
+  
+  // WhatsApp connection buttons
+  if (elements.connectButton) {
+    elements.connectButton.addEventListener('click', connectWhatsApp);
+  }
+  
+  if (elements.disconnectButton) {
+    elements.disconnectButton.addEventListener('click', disconnectWhatsApp);
+  }
+  
+  if (elements.logoutButton) {
+    elements.logoutButton.addEventListener('click', logoutWhatsApp);
+  }
+  
+  // Disconnect WhatsApp button
+  if (elements.disconnectWhatsAppBtn) {
+    elements.disconnectWhatsAppBtn.addEventListener('click', async () => {
+      await disconnectWhatsApp();
+    });
+  }
+  
+  // Logout WhatsApp button
+  if (elements.logoutWhatsAppBtn) {
+    elements.logoutWhatsAppBtn.addEventListener('click', async () => {
+      await logoutWhatsApp();
+    });
     }
   } catch (error) {
     console.error('Error setting up event listeners:', error);
@@ -732,7 +788,7 @@ export async function loadSettings(forceFresh = false) {
       // Always update UI when view is active OR when forced
       if (isViewActive || forceFresh) {
         console.log('Updating UI after loading settings...');
-        updateSettingsUI();
+      updateSettingsUI();
       }
     } else {
       console.warn('No settings returned from backend, trying localStorage');
@@ -746,7 +802,7 @@ export async function loadSettings(forceFresh = false) {
         // Update UI with stored settings
         if (isViewActive || forceFresh) {
           console.log('Updating UI with stored settings...');
-          updateSettingsUI();
+        updateSettingsUI();
         }
       } else {
         console.log('No settings found in backend or localStorage');
@@ -764,7 +820,7 @@ export async function loadSettings(forceFresh = false) {
       // Update UI with stored settings
       if (isViewActive || forceFresh) {
         console.log('Updating UI with fallback settings...');
-        updateSettingsUI();
+      updateSettingsUI();
       }
     }
   }
@@ -777,10 +833,10 @@ async function saveSettings() {
   // Variable to hold original button text for restoration
   let originalText = '';
   
-  // Check if a save is already in progress
+  // First check if a save is already in progress
   if (elements.settingsForm && elements.settingsForm.classList.contains('saving')) {
-    console.warn('Save already in progress, ignoring duplicate request');
-    return false;
+    console.log('Save already in progress but forcing a new save (overriding)');
+    // We'll continue anyway, forcing a new save
   }
   
   // Store the original button text
@@ -954,22 +1010,27 @@ async function saveSettings() {
     // ALWAYS reset the save button and form state, no matter what happened
     console.log('Resetting save button and form state');
     
+    // Wait a moment before resetting to ensure UI updates properly
+    setTimeout(() => {
     if (elements.saveButton) {
-      try {
-        elements.saveButton.disabled = false;
-        elements.saveButton.textContent = originalText || 'Save Settings';
-      } catch (e) {
-        console.error('Error resetting save button:', e);
+        try {
+      elements.saveButton.disabled = false;
+      elements.saveButton.textContent = originalText || 'Save Settings';
+        } catch (e) {
+          console.error('Error resetting save button:', e);
+        }
       }
+      
+      if (elements.settingsForm) {
+        try {
+          elements.settingsForm.classList.remove('saving');
+    } catch (e) {
+          console.error('Error removing saving class from form:', e);
     }
-    
-    if (elements.settingsForm) {
-      try {
-        elements.settingsForm.classList.remove('saving');
-      } catch (e) {
-        console.error('Error removing saving class from form:', e);
-      }
-    }
+  }
+  
+      console.log('Save button and form state fully reset');
+    }, 300);
   }
 }
 
@@ -981,8 +1042,8 @@ function updateSettingsUI() {
   
   // Force fresh element references and wait a bit for DOM
   setTimeout(() => {
-    cacheElements();
-    
+  cacheElements();
+  
     // Verify we have the elements
     if (!elements.startTime || !elements.endTime) {
       console.warn('Time elements not found, retrying...');

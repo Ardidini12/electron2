@@ -193,11 +193,36 @@ async function _initDatabaseInternal() {
       throw new Error('Failed to create required database tables');
     }
     
-    // Verify tables exist (will throw if they don't)
-    await Contact.findOne();
-    await Template.findOne();
-    await Message.findOne();
-    await ScheduleSettings.findOne();
+    // Verify tables exist but handle possible missing columns
+    try {
+      // Try to access tables with a more robust approach
+      await Contact.findOne();
+      await Template.findOne();
+      
+      // For Message, use a simpler query to avoid issues with missing columns
+      try {
+        await Message.findOne();
+      } catch (error) {
+        if (error.name === 'SequelizeDatabaseError' && error.parent && 
+            (error.parent.code === 'SQLITE_ERROR') && 
+            (error.message.includes('no such column'))) {
+          
+          console.warn('Database schema mismatch detected. Some columns may be missing.');
+          console.warn('Please run the migration script with: npm run migrate');
+          
+          // Use a raw query that only selects the columns we know exist
+          await sequelize.query('SELECT id, status, scheduledTime, sentTime FROM Messages LIMIT 1');
+          console.log('Basic Message table verification passed with limited columns');
+        } else {
+          throw error;
+        }
+      }
+      
+      await ScheduleSettings.findOne();
+    } catch (error) {
+      console.error('Error verifying database tables:', error);
+      throw error;
+    }
     
     dbInitialized = true;
     console.log('Database initialized successfully');
