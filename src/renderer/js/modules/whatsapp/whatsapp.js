@@ -50,11 +50,89 @@ function setupWhatsAppConnection() {
     settingsLogoutButton.addEventListener('click', () => disconnectWhatsApp(true));
   }
   
+  // Always hide the sidebar phone info - we'll only use the corner display
+  const phoneInfoContainer = document.getElementById('phone-info');
+  if (phoneInfoContainer) {
+    phoneInfoContainer.style.display = 'none';
+  }
+  
+  // Load saved WhatsApp info from localStorage for the corner display
+  loadWhatsAppInfoFromLocalStorage();
+  
   // Set up WhatsApp event listeners
   setupWhatsAppEventListeners();
   
+  // Set up click handler for corner info
+  const cornerInfo = document.getElementById('whatsapp-corner-info');
+  if (cornerInfo) {
+    // Variables to track if we're dragging
+    let wasDragging = false;
+    let dragStartTime = 0;
+    
+    // Check if an element was being dragged before navigating to settings
+    cornerInfo.addEventListener('mousedown', () => {
+      wasDragging = false;
+      dragStartTime = Date.now();
+    });
+    
+    cornerInfo.addEventListener('mousemove', () => {
+      // If we've moved the mouse while holding down, we're dragging
+      if (dragStartTime > 0) {
+        wasDragging = true;
+      }
+    });
+    
+    // Only navigate to settings on click, not after drag
+    cornerInfo.addEventListener('mouseup', (e) => {
+      // Don't navigate if the target is the drag handle
+      if (e.target.classList.contains('drag-handle')) {
+        return;
+      }
+      
+      // Don't navigate if the element has the dragging data attribute
+      if (cornerInfo.hasAttribute('data-is-dragging')) {
+        return;
+      }
+      
+      // Only navigate if:
+      // 1. We weren't dragging (just a clean click)
+      // 2. Or it was a very short "drag" (under 200ms) which is likely just a click
+      const clickDuration = Date.now() - dragStartTime;
+      const isQuickClick = clickDuration < 200;
+      
+      if (!wasDragging || isQuickClick) {
+        // Switch to settings tab when clicking the corner info
+        const settingsSection = document.getElementById('settings');
+        if (settingsSection) {
+          document.querySelectorAll('.content-section.active').forEach(section => {
+            section.classList.remove('active');
+          });
+          settingsSection.classList.add('active');
+          
+          document.querySelectorAll('.nav-item.active').forEach(item => {
+            item.classList.remove('active');
+          });
+          const settingsMenuItem = document.querySelector('.nav-item[data-target="settings"]');
+          if (settingsMenuItem) {
+            settingsMenuItem.classList.add('active');
+          }
+        }
+      }
+      
+      // Reset for next interaction
+      wasDragging = false;
+      dragStartTime = 0;
+    });
+  }
+  
   // Check WhatsApp status immediately and auto-connect if session exists
   checkAndAutoConnect();
+  
+  // Remove any code that shows or toggles autoconnect button
+  const autoconnectButton = document.getElementById('autoconnect-toggle');
+  if (autoconnectButton) {
+    autoconnectButton.style.display = 'none';
+  }
 }
 
 /**
@@ -62,35 +140,46 @@ function setupWhatsAppConnection() {
  */
 async function checkAndAutoConnect() {
   try {
-    console.log('Checking WhatsApp status and session...');
+    console.log('Checking WhatsApp session status...');
     const status = await window.api.getWhatsAppStatus();
-    console.log('Current WhatsApp status:', status);
     
     // Update UI based on current status
-    updateWhatsAppStatus(typeof status === 'object' ? status.status?.toUpperCase() || 'DISCONNECTED' : status);
+    const statusString = typeof status === 'object' ? status.status?.toUpperCase() || 'DISCONNECTED' : status;
+    updateWhatsAppStatus(statusString);
     
     // Check if already connected
     if (status.isConnected) {
-      // If already connected, update UI but don't try to connect again
+      // Force update UI to connected state
+      updateWhatsAppStatus('CONNECTED');
+      hideQRCode();
+      
+      // Get phone info
       updateConnectedPhoneInfo();
+      
+      // Reset session deleted flag
+      sessionDeleted = false;
       initialCheck = false;
+      return; // Exit early if already connected
     } 
-    // If there's a session but not connected, and this is the initial check
-    else if (status.hasExistingSession && initialCheck && !sessionDeleted) {
-      console.log('Existing session found, auto-connecting...');
+    
+    // If there's a session but not connected, always auto-connect
+    if (status.hasExistingSession && !sessionDeleted) {
       showNotification('WhatsApp', 'Existing session found, connecting...', 'info');
       
-      // Small delay to ensure UI is ready
-      setTimeout(() => {
-        connectWhatsApp(true); // true = auto-connect mode
-      }, 1000);
+      // Show connecting status
+      updateWhatsAppStatus('CONNECTING');
       
-      // No longer initial check
-      initialCheck = false;
+      // Connect with auto-connect flag
+      connectWhatsApp(true);
     } 
-    // If no session or session was deleted
+    // If no session or session was deleted, show QR directly
     else if (!status.hasExistingSession || sessionDeleted) {
-      console.log('No existing session found or session was deleted, manual connection required');
+      // Show connecting status first
+      updateWhatsAppStatus('CONNECTING');
+      
+      // Connect to get QR code
+      connectWhatsApp(false);
+      
       if (initialCheck) {
         showNotification('WhatsApp', 'Please connect to WhatsApp and scan the QR code', 'info');
         initialCheck = false;
@@ -100,6 +189,12 @@ async function checkAndAutoConnect() {
     console.error('Error checking WhatsApp status for auto-connect:', error);
     showNotification('WhatsApp Error', 'Failed to check WhatsApp session', 'error');
     initialCheck = false;
+    
+    // Set UI to disconnected state on error
+    updateWhatsAppStatus('DISCONNECTED');
+    hideQRCode();
+    hidePhoneInfo();
+    resetAllButtons();
   }
 }
 
@@ -107,117 +202,315 @@ async function checkAndAutoConnect() {
  * Set up event listeners for WhatsApp events
  */
 function setupWhatsAppEventListeners() {
-  // Remove any existing listeners to prevent duplicates
-  if (window.api && window.api.removeAllListeners) {
-    window.api.removeAllListeners('whatsapp-qr');
-    window.api.removeAllListeners('whatsapp-ready');
-    window.api.removeAllListeners('whatsapp-authenticated');
-    window.api.removeAllListeners('whatsapp-disconnected');
-    window.api.removeAllListeners('whatsapp-session-check');
-  }
+  // Phone info should only be updated on significant events, not periodically
+  const lastRefresh = {
+    timestamp: 0
+  };
   
-  // Set up event listeners
-  if (window.api && window.api.on) {
-    window.api.on('whatsapp-qr', (qr) => {
-      showQRCode(qr);
-      updateWhatsAppStatus('SCANNING');
-      showNotification('WhatsApp QR Code', 'Please scan the QR code with your phone', 'info');
-    });
+  // Remove existing listeners to avoid duplicates
+  window.api.removeAllListeners('whatsapp-status');
+  window.api.removeAllListeners('whatsapp-qr');
+  window.api.removeAllListeners('whatsapp-ready');
+  window.api.removeAllListeners('whatsapp-authenticated');
+  window.api.removeAllListeners('whatsapp-disconnected');
+  window.api.removeAllListeners('whatsapp-info');
+  window.api.removeAllListeners('whatsapp-session-check');
+  window.api.removeAllListeners('whatsapp-state');
+  window.api.removeAllListeners('loading');
+  window.api.removeAllListeners('browser-disconnected');
+  
+  // Listen for status changes
+  window.api.on('whatsapp-status', (status, reason) => {
+    console.log(`WhatsApp status changed: ${status}`, reason || '');
+    updateWhatsAppStatus(status);
     
-    window.api.on('whatsapp-ready', () => {
+    // Only refresh phone info on CONNECTED state and not too frequently
+    if (status === 'CONNECTED') {
+      const now = Date.now();
+      if (now - lastRefresh.timestamp > 10000) { // Max once per 10 seconds
+        lastRefresh.timestamp = now;
+        updateConnectedPhoneInfo();
+      }
+    } else if (status === 'DISCONNECTED' || status === 'AUTH_FAILED') {
+      hidePhoneInfo();
+    }
+  });
+  
+  // Listen for browser disconnection events
+  window.api.on('browser-disconnected', () => {
+    console.log('Browser disconnected event received');
+    showNotification('WhatsApp Error', 'Browser disconnected, reconnecting...', 'error');
+    
+    // Update UI
+    updateWhatsAppStatus('DISCONNECTED');
+    hideQRCode();
+    hidePhoneInfo();
+    
+    // Wait a moment then attempt to reconnect
+    setTimeout(() => {
+      resetAllButtons();
+      connectWhatsApp(true);
+    }, 5000);
+  });
+  
+  // Listen for phone info updates
+  window.api.on('whatsapp-info', (phoneInfo) => {
+    if (!phoneInfo || !phoneInfo.connected) {
+      hidePhoneInfo();
+      return;
+    }
+    
+    const now = Date.now();
+    if (now - lastRefresh.timestamp > 5000) { // Debounce updates
+      lastRefresh.timestamp = now;
+      
+      // Store current values to check if they've changed
+      const currentPhoneNumber = document.getElementById('connected-phone-number')?.textContent;
+      const currentPhoneName = document.getElementById('connected-phone-name')?.textContent;
+      
+      // Only update if values have actually changed
+      if (currentPhoneNumber !== phoneInfo.phoneNumber || 
+          currentPhoneName !== phoneInfo.name) {
+        console.log('Phone info event received with new data, updating UI');
+        updateConnectedPhoneInfo();
+      } else {
+        console.log('Phone info event received but data unchanged, skipping UI update');
+      }
+    }
+  });
+  
+  // QR code event
+  window.api.on('whatsapp-qr', (qr) => {
+    console.log('Received QR code from main process');
+    
+    // Always clear any existing QR code first
+    const qrCodeDiv = document.getElementById('qr-code');
+    if (qrCodeDiv) {
+      qrCodeDiv.innerHTML = '';
+    }
+    
+    // Only show QR if we have a valid QR code
+    if (qr) {
+    showQRCode(qr);
+    updateWhatsAppStatus('SCANNING');
+    showNotification('WhatsApp QR Code', 'Please scan the QR code with your phone', 'info');
+    } else {
+      // If QR is null, this could mean either:
+      // 1. Already authenticated (wait for authenticated/ready event)
+      // 2. Error getting QR (show disconnected state after a timeout)
+      console.log('Received null QR code - waiting for other events...');
+      
+      // Set a timeout to check if we're still not connected after a while
+      setTimeout(async () => {
+        const status = await window.api.getWhatsAppStatus();
+        if (!status.isConnected) {
+          console.log('Still not connected after null QR, updating UI to disconnected');
+          updateWhatsAppStatus('DISCONNECTED');
+          
+          // After showing disconnected, try to reconnect with a new QR
+          setTimeout(() => {
+            console.log('Attempting to reconnect and get a new QR code');
+            connectWhatsApp(false);
+          }, 5000);
+        }
+      }, 8000);
+    }
+  });
+  
+  // Listen for loading screen events
+  window.api.on('loading', (data) => {
+    console.log(`WhatsApp loading: ${data.percent}% - ${data.message}`);
+    updateWhatsAppStatus('LOADING');
+    hideQRCode();
+    
+    // Show a loading notification if the process takes a while
+    if (data.percent < 50) {
+      showNotification('WhatsApp', `Loading WhatsApp: ${data.message}`, 'info');
+    }
+  });
+  
+  // Ready event (client is fully ready)
+  window.api.on('whatsapp-ready', () => {
+    console.log('WhatsApp ready event received');
+    updateWhatsAppStatus('CONNECTED');
+    hideQRCode();
+    updateConnectedPhoneInfo();
+    showNotification('WhatsApp Connected', 'WhatsApp is now connected', 'success');
+    
+    // Reset session deleted flag when successfully connected
+    sessionDeleted = false;
+  });
+  
+  // Authentication event
+  window.api.on('whatsapp-authenticated', () => {
+    console.log('WhatsApp authenticated event received');
+    updateWhatsAppStatus('AUTHENTICATED');
+    hideQRCode();
+    showNotification('WhatsApp Authenticated', 'Authentication successful', 'success');
+    
+    // Reset session deleted flag when successfully authenticated
+    sessionDeleted = false;
+  });
+  
+  // Disconnected event
+  window.api.on('whatsapp-disconnected', (reason) => {
+    console.log(`WhatsApp disconnected event received, reason: ${reason || 'unknown'}`);
+    updateWhatsAppStatus('DISCONNECTED');
+    hideQRCode();
+    hidePhoneInfo();
+    showNotification('WhatsApp Disconnected', `Disconnected: ${reason || 'Connection lost'}`, 'warning');
+    
+    // Reset buttons when disconnected
+    resetAllButtons();
+    
+    // If not logout, try to reconnect after a delay
+    if (reason !== 'LOGOUT' && !sessionDeleted) {
+      setTimeout(() => {
+        checkAndAutoConnect();
+      }, 10000); // Try to reconnect after 10 seconds
+    }
+  });
+  
+  // State change event
+  window.api.on('whatsapp-state', (state) => {
+    console.log(`WhatsApp state changed: ${state}`);
+    if (state === 'CONNECTED') {
       updateWhatsAppStatus('CONNECTED');
       hideQRCode();
       updateConnectedPhoneInfo();
-      showNotification('WhatsApp Connected', 'WhatsApp is now connected', 'success');
-      
-      // Reset session deleted flag when successfully connected
-      sessionDeleted = false;
-    });
-    
-    window.api.on('whatsapp-authenticated', () => {
-      updateWhatsAppStatus('AUTHENTICATED');
-      hideQRCode();
-      showNotification('WhatsApp Authenticated', 'Authentication successful', 'success');
-      
-      // Reset session deleted flag when successfully authenticated
-      sessionDeleted = false;
-    });
-    
-    window.api.on('whatsapp-disconnected', (reason) => {
+    } else if (state === 'DISCONNECTED') {
       updateWhatsAppStatus('DISCONNECTED');
-      hideQRCode();
-      hidePhoneInfo();
-      showNotification('WhatsApp Disconnected', `Disconnected: ${reason}`, 'warning');
-      
-      // Reset buttons when disconnected
-      resetAllButtons();
-    });
+    }
+  });
+  
+  // Listen for session check from main process
+  window.api.on('whatsapp-session-check', (sessionInfo) => {
+    console.log('WhatsApp session check received:', sessionInfo);
     
-    // Listen for session check from main process
-    window.api.on('whatsapp-session-check', (sessionInfo) => {
-      console.log('Received WhatsApp session check:', sessionInfo);
-      
-      // If this is the initial load and a session exists, auto-connect
-      if (initialCheck && sessionInfo.hasExistingSession && !sessionDeleted) {
-        console.log('Auto-connecting to existing session...');
-        // Small delay to ensure UI is ready
-        setTimeout(() => {
-          connectWhatsApp(true); // true = auto-connect mode
-        }, 1000);
-      } else if (!sessionInfo.hasExistingSession || sessionDeleted) {
-        console.log('No existing session or session was deleted, manual connection required');
-        updateWhatsAppStatus('DISCONNECTED');
-        showNotification('WhatsApp', 'Please connect to WhatsApp and scan the QR code', 'info');
-      }
-      
-      // Mark as no longer initial check
+    // Update UI based on the status info we received
+    if (sessionInfo.status) {
+      updateWhatsAppStatus(sessionInfo.status.toUpperCase());
+    }
+    
+    // If already connected, just update the UI
+    if (sessionInfo.isConnected) {
+      console.log('WhatsApp is already connected');
+      updateWhatsAppStatus('CONNECTED');
+      hideQRCode();
+      updateConnectedPhoneInfo();
+      sessionDeleted = false;
       initialCheck = false;
-    });
-  }
+      return;
+    }
+    
+    // If a session exists, always auto-connect
+    if (sessionInfo.hasExistingSession && !sessionDeleted) {
+      console.log('Auto-connecting to existing session...');
+      // Small delay to ensure UI is ready
+      setTimeout(() => {
+        connectWhatsApp(true); // true = auto-connect mode
+      }, 1000);
+    } else if (!sessionInfo.hasExistingSession || sessionDeleted) {
+      updateWhatsAppStatus('DISCONNECTED');
+      // Don't show notification here, let the connection process handle it
+      
+      // If no session, initialize connection to get QR code
+      setTimeout(() => {
+        console.log('No session found, initializing connection to get QR code...');
+        connectWhatsApp(false);
+      }, 2000);
+    }
+    
+    // Mark as no longer initial check
+    initialCheck = false;
+  });
 }
 
 /**
  * Connect to WhatsApp
- * @param {boolean} isAutoConnect - Whether this is an automatic connection attempt
+ * @param {boolean} isAutoConnect - Whether this is an automatic connection
  */
 async function connectWhatsApp(isAutoConnect = false) {
   try {
-    // Show loading state in sidebar
-    const connectButton = document.getElementById('connect-whatsapp');
+    // Prevent multiple connection attempts
+    const connectButton = document.getElementById('whatsapp-connect-button');
     if (connectButton) {
+      if (connectButton.disabled) {
+        console.log('Connection already in progress, ignoring request');
+        return;
+      }
       connectButton.disabled = true;
-      connectButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
     }
     
-    // Show loading state in settings page
-    const settingsConnectButton = document.getElementById('settings-connect-whatsapp');
-    if (settingsConnectButton) {
-      settingsConnectButton.disabled = true;
-      settingsConnectButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
-    }
-    
-    // Clear any existing QR code
-    hideQRCode();
-    
-    // Update status before API call
+    // Update UI
     updateWhatsAppStatus('CONNECTING');
     
-    // Initialize WhatsApp - pass sessionDeleted flag to force QR if needed
-    console.log(`Connecting to WhatsApp with forceNewQR: ${sessionDeleted}`);
-    await window.api.initWhatsApp(sessionDeleted);
-    
-    // Show notification only if not auto-connecting
+    // Don't show notification if auto-connecting
     if (!isAutoConnect) {
-      showNotification('WhatsApp Connection', 'Connecting to WhatsApp...', 'info');
+      showNotification('WhatsApp', 'Connecting to WhatsApp...', 'info');
     }
+    
+    console.log(`Connecting to WhatsApp (Auto-connect: ${isAutoConnect})`);
+    
+    // If session was explicitly deleted, force new QR
+    const forceNewQR = sessionDeleted;
+    
+    // Initialize WhatsApp
+    try {
+      const result = await window.api.initWhatsApp(forceNewQR);
+      console.log('WhatsApp initialization result:', result);
+      
+      // Reset session deleted flag after initialization
+      if (result.success) {
+        sessionDeleted = false;
+      }
+    } catch (initError) {
+      console.error('WhatsApp initialization error:', initError);
+      
+      // Check if the error is related to browser disconnection
+      if (initError.message && (
+          initError.message.includes('browser has disconnected') || 
+          initError.message.includes('Navigation failed'))) {
+        
+        showNotification('WhatsApp Error', 'Browser disconnected, retrying...', 'error');
+        
+        // Wait a bit longer before retrying to ensure resources are freed
+        setTimeout(async () => {
+          try {
+            // First disconnect to clean up
+            await window.api.disconnectWhatsApp(false);
+            
+            // Wait for cleanup
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Try again with fresh session
+            console.log('Retrying connection after browser disconnect');
+            sessionDeleted = true; // Force new QR
+            updateWhatsAppStatus('CONNECTING');
+            await window.api.initWhatsApp(true);
+          } catch (retryError) {
+            console.error('Error during reconnection after browser disconnect:', retryError);
+            resetAllButtons();
+            updateWhatsAppStatus('DISCONNECTED');
+            showNotification('WhatsApp Error', 'Failed to reconnect after browser disconnect', 'error');
+          }
+        }, 5000);
+        return;
+      }
+      
+      // For other errors, just show the error
+      resetAllButtons();
+      updateWhatsAppStatus('DISCONNECTED');
+      showNotification('WhatsApp Error', initError.message || 'Failed to connect to WhatsApp', 'error');
+        return;
+    }
+    
+    // Don't disable the button on success as it will be updated by the status handlers
+    
   } catch (error) {
     console.error('Error connecting to WhatsApp:', error);
-    showNotification('WhatsApp Error', error.message, 'error');
-    
-    // Reset button and status
+    showNotification('WhatsApp Error', error.message || 'Failed to connect to WhatsApp', 'error');
     updateWhatsAppStatus('DISCONNECTED');
-    
-    // Reset all buttons
     resetAllButtons();
   }
 }
@@ -228,51 +521,71 @@ async function connectWhatsApp(isAutoConnect = false) {
  */
 async function disconnectWhatsApp(deleteSession = false) {
   try {
-    // Update status before API call
-    updateWhatsAppStatus('DISCONNECTING');
+    // Prevent multiple disconnection attempts
+    const disconnectButton = document.getElementById('whatsapp-disconnect-button');
+    const deleteSessionButton = document.getElementById('whatsapp-delete-session-button');
+    const connectButton = document.getElementById('whatsapp-connect-button');
     
-    // Update sidebar button
-    const disconnectButton = document.getElementById('disconnect-whatsapp');
-    if (disconnectButton) {
-      disconnectButton.disabled = true;
-      disconnectButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Disconnecting...';
+    if (disconnectButton) disconnectButton.disabled = true;
+    if (deleteSessionButton) deleteSessionButton.disabled = true;
+    if (connectButton) connectButton.disabled = true;
+    
+    // Update UI before operation
+    updateWhatsAppStatus(deleteSession ? 'LOGGING_OUT' : 'DISCONNECTING');
+    
+    console.log(`Disconnecting from WhatsApp (Delete session: ${deleteSession})`);
+    
+    // Mark session as deleted if we're logging out
+    if (deleteSession) {
+      sessionDeleted = true;
+      
+      // Update corner info to logged out state immediately
+      updateCornerWhatsAppInfo(null, 'LOGGED_OUT');
+    } else {
+      // Just disconnected, show disconnected state
+      updateCornerWhatsAppInfo(null, 'DISCONNECTED');
     }
     
-    // Update settings page button
-    const settingsDisconnectButton = document.getElementById('settings-disconnect-whatsapp');
-    if (settingsDisconnectButton) {
-      settingsDisconnectButton.disabled = true;
-      settingsDisconnectButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Disconnecting...';
+    try {
+      // Disconnect from WhatsApp
+      const result = await window.api.disconnectWhatsApp(deleteSession);
+      console.log('WhatsApp disconnection result:', result);
+    } catch (disconnectError) {
+      console.error('Error during WhatsApp disconnect call:', disconnectError);
+      
+      // Even if disconnect API call fails, update UI to disconnected state
+      // This ensures the user can try to connect again
+      showNotification('WhatsApp Error', 'Error during disconnection, app state has been reset', 'warning');
     }
     
-    await window.api.disconnectWhatsApp(deleteSession);
-    showNotification(
-      'WhatsApp Disconnected', 
-      deleteSession ? 'Session data has been deleted' : 'WhatsApp has been disconnected', 
-      'info'
-    );
-    
-    // Force reset all buttons
-    resetAllButtons();
-    
-    // Update UI status
-    updateWhatsAppStatus('DISCONNECTED');
+    // Always update UI to disconnected state, even if the operation failed
+    updateWhatsAppStatus(deleteSession ? 'LOGGED_OUT' : 'DISCONNECTED');
     hideQRCode();
     hidePhoneInfo();
     
-    // If session was deleted, show QR code if user attempts to reconnect
+    // Show notification only if no error occurred
+    showNotification(
+      'WhatsApp', 
+      deleteSession ? 'Logged out from WhatsApp' : 'Disconnected from WhatsApp',
+      'info'
+    );
+    
+    // Always reset buttons to ensure UI is usable
+    resetAllButtons();
+    
+    // If we deleted the session, wait a moment and then reconnect to show QR code
     if (deleteSession) {
-      sessionDeleted = true;
+      setTimeout(() => {
+        connectWhatsApp(false); // false = not auto-connect, to show QR
+      }, 3000);
     }
   } catch (error) {
     console.error('Error disconnecting from WhatsApp:', error);
-    showNotification('WhatsApp Error', error.message, 'error');
+    showNotification('WhatsApp Error', error.message || 'Failed to disconnect from WhatsApp', 'error');
     
-    // Force reset all buttons even on error
+    // Always reset buttons on error
     resetAllButtons();
-    
-    // Check current status to update UI correctly
-    checkWhatsAppStatus();
+    updateWhatsAppStatus('DISCONNECTED');
   }
 }
 
@@ -337,6 +650,18 @@ function updateWhatsAppStatus(status) {
   
   // Update status in settings page
   updateSettingsStatus(status);
+  
+  // Update corner info status (don't need to pass phone info, it will be retrieved if needed)
+  const cornerInfo = document.getElementById('whatsapp-corner-info');
+  if (cornerInfo) {
+    if (status === 'CONNECTED' || status === 'READY') {
+      // For connected state, let's get the latest phone info
+      updateConnectedPhoneInfo();
+    } else {
+      // For other states, just pass the status to update the UI accordingly
+      updateCornerWhatsAppInfo(null, status);
+    }
+  }
 }
 
 /**
@@ -499,87 +824,186 @@ function updateSettingsStatus(status) {
 /**
  * Update connected phone information in the sidebar
  */
-async function updateConnectedPhoneInfo() {
-  try {
-    const phoneInfo = await window.api.getWhatsAppInfo();
-    console.log('Phone info received:', phoneInfo);
-    
-    if (!phoneInfo || !phoneInfo.connected) {
+function updateConnectedPhoneInfo() {
+  window.api.getWhatsAppInfo()
+    .then(phoneInfo => {
+      // Store current values to check if they've changed
+      const currentPhoneNumber = document.getElementById('connected-phone-number')?.textContent;
+      const currentPhoneName = document.getElementById('connected-phone-name')?.textContent;
+      const currentProfilePic = document.getElementById('connected-profile-pic')?.src;
+      
+      if (!phoneInfo || !phoneInfo.connected || !phoneInfo.phoneNumber || !phoneInfo.name) {
+        console.warn('Phone info missing or incomplete:', phoneInfo);
+        hidePhoneInfo();
+        return;
+      }
+      
+      // Only update if values have actually changed
+      const hasChanged = 
+        currentPhoneNumber !== phoneInfo.phoneNumber ||
+        currentPhoneName !== phoneInfo.name ||
+        (phoneInfo.profilePictureUrl && currentProfilePic !== phoneInfo.profilePictureUrl);
+      
+      if (!hasChanged) {
+        console.log('Phone info unchanged, skipping UI update');
+        // Even if sidebar doesn't need updating, make sure corner info is displayed
+        updateCornerWhatsAppInfo(phoneInfo);
+        return;
+      }
+      
+      // Update UI with new values
+      console.log('Phone info changed, updating UI');
+      updateWhatsAppStatus('CONNECTED');
+      hideQRCode();
+      
+      // We're not showing the sidebar phone info anymore, only using corner display
+      // But keep the code for backwards compatibility
+      const phoneInfoContainer = document.getElementById('phone-info');
+      if (phoneInfoContainer) {
+        // Always keep this hidden now
+        phoneInfoContainer.style.display = 'none';
+        
+        // Still update the values in case other code references them
+        const phoneNumberElem = document.getElementById('connected-phone-number');
+        const phoneNameElem = document.getElementById('connected-phone-name');
+        if (phoneNumberElem) phoneNumberElem.textContent = phoneInfo.phoneNumber;
+        if (phoneNameElem) phoneNameElem.textContent = phoneInfo.name;
+        
+        const profilePic = document.getElementById('connected-profile-pic');
+        if (profilePic && phoneInfo.profilePictureUrl) {
+          profilePic.src = phoneInfo.profilePictureUrl;
+          // Keep hidden
+          profilePic.style.display = 'none';
+        } else if (profilePic) {
+          profilePic.style.display = 'none';
+        }
+      }
+      
+      // Update corner WhatsApp info - this is the only display we'll show now
+      updateCornerWhatsAppInfo(phoneInfo);
+      
+      // Only update settings UI if values changed
+      updateSettingsPhoneInfo(phoneInfo);
+      
+      // Save phone info to localStorage for persistence
+      saveWhatsAppInfoToLocalStorage(phoneInfo);
+      
+      // Update buttons
+      const connectButton = document.getElementById('connect-whatsapp');
+      const disconnectButton = document.getElementById('disconnect-whatsapp');
+      const deleteSessionButton = document.getElementById('delete-session');
+      if (connectButton) connectButton.style.display = 'none';
+      if (disconnectButton) disconnectButton.style.display = 'inline-block';
+      if (deleteSessionButton) deleteSessionButton.style.display = 'inline-block';
+      
+      const settingsConnectButton = document.getElementById('settings-connect-whatsapp');
+      const settingsDisconnectButton = document.getElementById('settings-disconnect-whatsapp');
+      const settingsLogoutButton = document.getElementById('settings-logout-whatsapp');
+      if (settingsConnectButton) settingsConnectButton.style.display = 'none';
+      if (settingsDisconnectButton) settingsDisconnectButton.style.display = 'inline-block';
+      if (settingsLogoutButton) settingsLogoutButton.style.display = 'inline-block';
+    })
+    .catch(error => {
+      console.error('Error fetching phone info:', error);
       hidePhoneInfo();
-      return;
-    }
+      
+      // Try to load cached info from localStorage
+      loadWhatsAppInfoFromLocalStorage();
+    });
+}
+
+/**
+ * Save WhatsApp info to localStorage for persistence
+ * @param {Object} phoneInfo - Phone information object
+ */
+function saveWhatsAppInfoToLocalStorage(phoneInfo) {
+  if (!phoneInfo || !phoneInfo.connected) return;
+  
+  try {
+    const infoToSave = {
+      phoneNumber: phoneInfo.phoneNumber,
+      name: phoneInfo.name,
+      profilePictureUrl: phoneInfo.profilePictureUrl || '',
+      lastConnected: new Date().toISOString()
+    };
     
-    // Update sidebar phone info
-    const phoneInfoContainer = document.getElementById('phone-info');
-    if (phoneInfoContainer) {
-      phoneInfoContainer.style.display = 'flex';
-      
-      // Update phone information
-      const phoneNumberElem = document.getElementById('connected-phone-number');
-      const phoneNameElem = document.getElementById('connected-phone-name');
-      
-      if (phoneNumberElem) {
-        phoneNumberElem.textContent = phoneInfo.phoneNumber || 'Unknown';
-      }
-      
-      if (phoneNameElem) {
-        phoneNameElem.textContent = phoneInfo.name || 'Unknown';
-      }
-      
-      // Update profile picture if available
-      const profilePic = document.getElementById('connected-profile-pic');
-      if (profilePic && phoneInfo.profilePictureUrl) {
-        profilePic.src = phoneInfo.profilePictureUrl;
-        profilePic.style.display = 'block';
-      } else if (profilePic) {
-        profilePic.style.display = 'none';
-      }
-    }
-    
-    // Also update settings page phone info
-    updateSettingsPhoneInfo(phoneInfo);
-    
+    localStorage.setItem('whatsappInfo', JSON.stringify(infoToSave));
+    console.log('Saved WhatsApp info to localStorage');
   } catch (error) {
-    console.error('Error updating phone info:', error);
-    hidePhoneInfo();
+    console.error('Error saving WhatsApp info to localStorage:', error);
   }
 }
 
 /**
- * Update connected phone information in the settings page
- * @param {Object} phoneInfo - Phone information object (optional)
+ * Load WhatsApp info from localStorage
  */
-async function updateSettingsPhoneInfo(phoneInfo = null) {
+function loadWhatsAppInfoFromLocalStorage() {
   try {
-    // If phone info wasn't provided, fetch it
-    if (!phoneInfo) {
-      phoneInfo = await window.api.getWhatsAppInfo();
-    }
+    const savedInfo = localStorage.getItem('whatsappInfo');
+    if (!savedInfo) return;
     
-    if (!phoneInfo || !phoneInfo.connected) {
-      // Hide settings page phone info
-      const settingsPhoneInfo = document.getElementById('settings-phone-info');
-      if (settingsPhoneInfo) {
-        settingsPhoneInfo.style.display = 'none';
-      }
+    const phoneInfo = JSON.parse(savedInfo);
+    console.log('Loaded WhatsApp info from localStorage:', phoneInfo);
+    
+    // Update corner info with saved data
+    updateCornerWhatsAppInfo(phoneInfo);
+    
+    return phoneInfo;
+  } catch (error) {
+    console.error('Error loading WhatsApp info from localStorage:', error);
+    return null;
+  }
+}
+
+/**
+ * Update the corner WhatsApp info display
+ * @param {Object} phoneInfo - Phone information object
+ * @param {string} status - Connection status (optional)
+ */
+function updateCornerWhatsAppInfo(phoneInfo, status = null) {
+  const cornerInfo = document.getElementById('whatsapp-corner-info');
+  const cornerPhoneName = document.getElementById('corner-phone-name');
+  const cornerPhoneNumber = document.getElementById('corner-phone-number');
+  const cornerProfilePic = document.getElementById('corner-profile-pic');
+  
+  if (!cornerInfo || !cornerPhoneName || !cornerPhoneNumber || !cornerProfilePic) return;
+  
+  // Always make sure the corner info is visible
+  cornerInfo.style.display = 'block';
+  
+  // Remove all status classes first
+  cornerInfo.classList.remove('connected', 'disconnected', 'logged-out');
+  
+  // Apply status-based styling
+  if (status === 'LOGGED_OUT' || sessionDeleted) {
+    cornerInfo.classList.add('logged-out');
+    cornerPhoneName.textContent = 'Not Connected';
+    cornerPhoneNumber.textContent = 'Logged out';
+    cornerProfilePic.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OTYgNTEyIj48cGF0aCBmaWxsPSIjZDJkMmQyIiBkPSJNMjQ4IDhDMTExIDggMCAxMTkgMCAyNTZzMTExIDI0OCAyNDggMjQ4IDI0OC0xMTEgMjQ4LTI0OFMzODUgOCAyNDggOHptMCA5NmM0OC42IDAgODggMzkuNCA4OCA4OHMtMzkuNCA4OC04OCA4OC04OC0zOS40LTg4LTg4IDM5LjQtODggODgtODh6bTAgMzQ0Yy01OC43IDAtMTExLjMtMjYuNi0xNDYuNS02OC4yIDE4LjgtMzUuNCA1OC43LTU5LjggMTAzLjgtNTkuOCAxMS44IDAgMjMuMiAzLjIgMzMuMyA4LjkgMjEuMSAxMS45IDQ1LjEgMTEuOSA2Ni4zIDBDMzE0LjggMzIxLjIgMzI2LjIgMzE4IDMzOCAzMThjNDUuMSAwIDg1IDI0LjQgMTAzLjggNTkuOEMzNTkuMyA0MjEuNCAzMDYuNyA0NDggMjQ4IDQ0OHoiLz48L3N2Zz4=';
+    return;
+  } 
+  else if (status === 'DISCONNECTED' || !phoneInfo || !phoneInfo.phoneNumber) {
+    cornerInfo.classList.add('disconnected');
+    cornerPhoneName.textContent = 'Disconnected';
+    cornerPhoneNumber.textContent = 'Tap to reconnect';
+    // Use gray WhatsApp icon
+    cornerProfilePic.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OTYgNTEyIj48cGF0aCBmaWxsPSIjOGU4ZThlIiBkPSJNMjQ4IDhDMTExIDggMCAxMTkgMCAyNTZzMTExIDI0OCAyNDggMjQ4IDI0OC0xMTEgMjQ4LTI0OFMzODUgOCAyNDggOHptMCA5NmM0OC42IDAgODggMzkuNCA4OCA4OHMtMzkuNCA4OC04OCA4OC04OC0zOS40LTg4LTg4IDM5LjQtODggODgtODh6bTAgMzQ0Yy01OC43IDAtMTExLjMtMjYuNi0xNDYuNS02OC4yIDE4LjgtMzUuNCA1OC43LTU5LjggMTAzLjgtNTkuOCAxMS44IDAgMjMuMiAzLjIgMzMuMyA4LjkgMjEuMSAxMS45IDQ1LjEgMTEuOSA2Ni4zIDBDMzE0LjggMzIxLjIgMzI2LjIgMzE4IDMzOCAzMThjNDUuMSAwIDg1IDI0LjQgMTAzLjggNTkuOEMzNTkuMyA0MjEuNCAzMDYuNyA0NDggMjQ4IDQ0OHoiLz48L3N2Zz4=';
       return;
     }
+  else {
+    // Connected state
+    cornerInfo.classList.add('connected');
     
-    // Update settings page phone info
-    const settingsPhoneInfo = document.getElementById('settings-phone-info');
-    const settingsPhoneText = document.getElementById('settings-connected-phone');
+    // Update the corner info with phone data
+    cornerPhoneName.textContent = phoneInfo.name || 'Unknown';
+    cornerPhoneNumber.textContent = phoneInfo.phoneNumber || '';
     
-    if (settingsPhoneInfo && settingsPhoneText) {
-      settingsPhoneInfo.style.display = 'block';
-      settingsPhoneText.textContent = `${phoneInfo.name || 'Unknown'} (${phoneInfo.phoneNumber || 'Unknown'})`;
-    }
-  } catch (error) {
-    console.error('Error updating settings phone info:', error);
-    
-    // Hide settings page phone info
-    const settingsPhoneInfo = document.getElementById('settings-phone-info');
-    if (settingsPhoneInfo) {
-      settingsPhoneInfo.style.display = 'none';
+    // Set profile picture
+    if (phoneInfo.profilePictureUrl) {
+      cornerProfilePic.src = phoneInfo.profilePictureUrl;
+    } else {
+      // Default WhatsApp profile icon
+      cornerProfilePic.src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA0OTYgNTEyIj48cGF0aCBmaWxsPSIjZmZmZmZmIiBkPSJNMjQ4IDhDMTExIDggMCAxMTkgMCAyNTZzMTExIDI0OCAyNDggMjQ4IDI0OC0xMTEgMjQ4LTI0OFMzODUgOCAyNDggOHptMCA5NmM0OC42IDAgODggMzkuNCA4OCA4OHMtMzkuNCA4OC04OCA4OC04OC0zOS40LTg4LTg4IDM5LjQtODggODgtODh6bTAgMzQ0Yy01OC43IDAtMTExLjMtMjYuNi0xNDYuNS02OC4yIDE4LjgtMzUuNCA1OC43LTU5LjggMTAzLjgtNTkuOCAxMS44IDAgMjMuMiAzLjIgMzMuMyA4LjkgMjEuMSAxMS45IDQ1LjEgMTEuOSA2Ni4zIDBDMzE0LjggMzIxLjIgMzI2LjIgMzE4IDMzOCAzMThjNDUuMSAwIDg1IDI0LjQgMTAzLjggNTkuOEMzNTkuMyA0MjEuNCAzMDYuNyA0NDggMjQ4IDQ0OHoiLz48L3N2Zz4=';
     }
   }
 }
@@ -599,6 +1023,9 @@ function hidePhoneInfo() {
   if (settingsPhoneInfo) {
     settingsPhoneInfo.style.display = 'none';
   }
+  
+  // We intentionally don't hide the corner info here
+  // The corner info persists as the only WhatsApp info display
 }
 
 /**
@@ -729,6 +1156,91 @@ async function checkWhatsAppStatus() {
   }
 }
 
+/**
+ * Update connected phone information in the settings page
+ * @param {Object} phoneInfo - Phone information object (optional)
+ */
+async function updateSettingsPhoneInfo(phoneInfo = null) {
+  try {
+    if (!phoneInfo) {
+      phoneInfo = await window.api.getWhatsAppInfo();
+    }
+    const isConnected = phoneInfo?.connected && phoneInfo.phoneNumber && phoneInfo.name;
+    const settingsPhoneInfo = document.getElementById('settings-phone-info');
+    const settingsPhoneText = document.getElementById('settings-connected-phone');
+    if (!isConnected) {
+      if (settingsPhoneInfo) settingsPhoneInfo.style.display = 'none';
+      return;
+    }
+    if (settingsPhoneInfo && settingsPhoneText) {
+      settingsPhoneInfo.style.display = 'block';
+      settingsPhoneText.textContent = `${phoneInfo.name} (${phoneInfo.phoneNumber})`;
+    }
+  } catch (error) {
+    console.error('Error updating settings phone info:', error);
+    const settingsPhoneInfo = document.getElementById('settings-phone-info');
+    if (settingsPhoneInfo) settingsPhoneInfo.style.display = 'none';
+  }
+}
+
+/**
+ * Manually refresh phone information
+ */
+async function refreshPhoneInfo() {
+  try {
+    // Show loading state
+    const refreshButton = document.getElementById('refresh-phone-info');
+    if (refreshButton) {
+      refreshButton.disabled = true;
+      refreshButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    }
+    
+    // Show loading state in settings too
+    const settingsRefreshButton = document.getElementById('reload-phone-info');
+    if (settingsRefreshButton) {
+      settingsRefreshButton.disabled = true;
+      settingsRefreshButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    }
+    
+    // Call the API to refresh phone info
+    await window.api.refreshWhatsAppInfo();
+    
+    // Wait a moment for the info to be processed
+    setTimeout(async () => {
+      // Update the UI with the new info
+      await updateConnectedPhoneInfo();
+      
+      // Reset refresh button
+      if (refreshButton) {
+        refreshButton.disabled = false;
+        refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i>';
+      }
+      
+      // Reset settings refresh button
+      if (settingsRefreshButton) {
+        settingsRefreshButton.disabled = false;
+        settingsRefreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+      }
+    }, 1000);
+  } catch (error) {
+    console.error('Error refreshing phone info:', error);
+    
+    // Reset refresh button on error
+    const refreshButton = document.getElementById('refresh-phone-info');
+    if (refreshButton) {
+      refreshButton.disabled = false;
+      refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i>';
+    }
+    
+    // Reset settings refresh button on error
+    const settingsRefreshButton = document.getElementById('reload-phone-info');
+    if (settingsRefreshButton) {
+      settingsRefreshButton.disabled = false;
+      settingsRefreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Retry';
+    }
+  }
+}
+
 // Export WhatsApp functions
 export {
   setupWhatsAppConnection,
@@ -736,10 +1248,14 @@ export {
   disconnectWhatsApp,
   updateWhatsAppStatus,
   updateConnectedPhoneInfo,
+  refreshPhoneInfo,
   hidePhoneInfo,
   showQRCode,
   hideQRCode,
   checkWhatsAppStatus,
   checkAndAutoConnect,
-  resetAllButtons
+  resetAllButtons,
+  updateCornerWhatsAppInfo,
+  loadWhatsAppInfoFromLocalStorage,
+  saveWhatsAppInfoToLocalStorage
 }; 

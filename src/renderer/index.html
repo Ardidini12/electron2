@@ -8,6 +8,9 @@
   <!-- Preload essential scripts to improve loading speed -->
   <script src="js/esm-wrapper.js"></script>
   
+  <!-- Stylesheet links -->
+  <link rel="stylesheet" href="css/templates.css">
+  
   <!-- Add loading indicator styles -->
   <style>
     #app-loading {
@@ -101,8 +104,8 @@
         <div id="phone-info" class="phone-info" style="display: none;">
           <img id="connected-profile-pic" class="profile-pic" src="" alt="Profile" style="display: none;">
           <div>
-            <div id="connected-phone-name">Unknown</div>
-            <div id="connected-phone-number">Unknown</div>
+            <div id="connected-phone-name"></div>
+            <div id="connected-phone-number"></div>
           </div>
         </div>
         <div class="whatsapp-buttons">
@@ -270,17 +273,20 @@
             <div class="modal-body">
               <form id="import-form">
                 <div class="form-group">
-                  <label for="import-file">Select File:</label>
+                  <label for="import-file-path">Select File:</label>
                   <div class="file-input-container">
                     <input type="text" id="import-file-path" readonly placeholder="No file selected">
                     <button type="button" id="browse-file" class="secondary-btn">Browse</button>
                   </div>
                   <small>Supported formats: JSON, CSV, Excel (.xlsx, .xls)</small>
                 </div>
+                <!-- Add error display element -->
+                <div id="import-error" class="error-message" style="display: none; color: #e74c3c; margin-top: 10px; padding: 8px; background-color: rgba(231, 76, 60, 0.1); border-radius: 4px;"></div>
+                <div id="selected-file-info" style="margin-top: 10px; font-weight: bold; display: none;"></div>
                 <div class="form-group" id="import-progress-container" style="display: none;">
                   <label>Import Progress:</label>
                   <div class="progress-bar-container">
-                    <div class="progress-bar" id="import-progress"></div>
+                    <div class="progress-bar" id="import-progress-bar"></div>
                   </div>
                   <div class="progress-stats">
                     <span id="import-progress-text">0%</span>
@@ -459,6 +465,71 @@
                 <div class="form-group">
                   <label for="template-content">Message Content:</label>
                   <textarea id="template-content" rows="5" placeholder="Enter message content" required></textarea>
+                  <div class="template-variables-help">
+                    <div class="variables-toggle">
+                      <i class="fas fa-info-circle"></i>
+                      <span>Available Template Variables</span>
+                      <i class="fas fa-chevron-down"></i>
+                    </div>
+                    <div class="variables-content">
+                      <p>Use these variables in your templates. They will be replaced with actual contact data when sending messages:</p>
+                      <div class="variables-grid">
+                        <div class="variable-item">
+                          <code>{name}</code>
+                          <span>Contact's first name</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{surname}</code>
+                          <span>Contact's last name</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{fullname}</code>
+                          <span>Contact's full name</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{phone}</code>
+                          <span>Contact's phone number</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{email}</code>
+                          <span>Contact's email address</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{source}</code>
+                          <span>Contact's source</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{notes}</code>
+                          <span>Contact's notes</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{date}</code>
+                          <span>Current date</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{time}</code>
+                          <span>Current time</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{datetime}</code>
+                          <span>Current date and time</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{day}</code>
+                          <span>Current day name</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{month}</code>
+                          <span>Current month name</span>
+                        </div>
+                        <div class="variable-item">
+                          <code>{year}</code>
+                          <span>Current year</span>
+                        </div>
+                      </div>
+                      <p class="variables-note">Variables will be removed if no data is available for that contact.</p>
+                    </div>
+                  </div>
                 </div>
                 <div class="form-group">
                   <label for="template-image">Attach Image (optional):</label>
@@ -467,17 +538,27 @@
                     <button type="button" id="browse-image" class="secondary-btn">Browse</button>
                   </div>
                 </div>
-                <div class="form-group" id="image-preview-container" style="display: none;">
+                <div class="form-group" id="image-preview-container" style="display: none; position: relative;">
                   <label>Image Preview:</label>
                   <div class="image-preview">
-                    <img id="template-image-preview" src="" alt="Preview">
+                    <img id="template-image-preview" src="" alt="Preview" style="max-height: 200px; margin-bottom: 20px;">
+                    <div style="width: 100%; height: 10px; border-top: 1px solid #ddd; margin: 10px 0;"></div>
+                    <button type="button" id="remove-image" class="danger-btn" title="Remove Image" 
+                      style="margin-top: 15px; display: block !important; visibility: visible !important; position: relative; 
+                      z-index: 1000; background-color: #e74c3c !important; color: white !important; font-weight: bold; padding: 10px 15px !important; 
+                      width: 100%; border: 2px solid #c0392b !important; box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
+                      <i class="fas fa-trash"></i> REMOVE IMAGE
+                    </button>
                   </div>
                 </div>
               </form>
             </div>
             <div class="modal-footer">
               <button id="save-template" class="primary-btn">Save</button>
-              <button class="secondary-btn close-modal">Cancel</button>
+              <button id="footer-remove-image" type="button" class="danger-btn" style="display: none;">
+                <i class="fas fa-trash"></i> Remove Image
+              </button>
+              <button id="cancel-template" type="button" class="secondary-btn close-modal">Cancel</button>
             </div>
           </div>
         </div>
@@ -531,38 +612,49 @@
         <h1>Scheduled Messages</h1>
         <div class="action-bar">
           <div class="filter-container">
-            <label for="status-filter">Filter by Status:</label>
-            <select id="status-filter">
-              <option value="">All Messages</option>
+            <label for="status-filter">Status:</label>
+            <select id="status-filter" class="form-control">
+              <option value="ALL">All</option>
               <option value="SCHEDULED">Scheduled</option>
               <option value="PENDING">Pending</option>
               <option value="SENT">Sent</option>
               <option value="DELIVERED">Delivered</option>
               <option value="READ">Read</option>
               <option value="FAILED">Failed</option>
+              <option value="CANCELED">Canceled</option>
             </select>
           </div>
           <button id="refresh-messages" class="secondary-btn">
             <i class="fas fa-sync-alt"></i> Refresh
           </button>
         </div>
-
-        <div class="messages-table-container">
-          <table class="data-table" id="messages-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Contact</th>
-                <th>Template</th>
-                <th>Scheduled Time</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!-- Message rows will be added dynamically -->
-            </tbody>
-          </table>
+        
+        <!-- Messages container for card-based layout -->
+        <div id="messages-container" class="messages-container">
+          <!-- Messages will be rendered here dynamically -->
+          <div class="empty-state">
+            <i class="fas fa-calendar-alt"></i>
+            <h3>No scheduled messages</h3>
+            <p>Your scheduled messages will appear here.</p>
+          </div>
+        </div>
+        
+        <!-- Message details modal -->
+        <div id="message-details-modal" class="modal">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h2>Message Details</h2>
+              <span class="close-modal">&times;</span>
+            </div>
+            <div class="modal-body">
+              <div id="message-details-content">
+                <!-- Message details will be loaded here -->
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="secondary-btn close-modal">Close</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -619,7 +711,7 @@
                 </label>
               </div>
               <div class="form-actions">
-                <button type="submit" class="primary-btn">Save Settings</button>
+                <button type="submit" id="save-settings-btn" class="primary-btn" style="font-weight: bold; padding: 10px 20px;">Save Settings</button>
               </div>
             </form>
           </div>
@@ -638,10 +730,39 @@
                 <p>Scan this QR code with WhatsApp on your phone</p>
                 <div id="qr-code"></div>
               </div>
+              <div class="form-group">
+                <label for="settings-auto-connect">Auto-connect on startup:</label>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="settings-auto-connect" checked>
+                  <span class="toggle-slider"></span>
+                </label>
+                <small class="form-text text-muted">When enabled, WhatsApp will automatically connect when you start the application</small>
+              </div>
               <div class="connection-actions">
                 <button id="settings-connect-whatsapp" class="primary-btn">Connect WhatsApp</button>
                 <button id="settings-disconnect-whatsapp" class="secondary-btn">Disconnect</button>
                 <button id="settings-logout-whatsapp" class="secondary-btn danger-btn">Log Out</button>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Database Management Section -->
+          <div class="card mb-4">
+            <div class="card-header">
+              <h5 class="card-title">Database Management</h5>
+            </div>
+            <div class="card-body">
+              <div class="alert alert-warning">
+                <strong>Warning:</strong> The following actions can result in data loss. Only use if experiencing database issues.
+              </div>
+              <div class="mb-3">
+                <button id="reset-database-btn" class="btn btn-danger">
+                  <i class="fas fa-database"></i> Reset Database
+                </button>
+                <small class="form-text text-muted mt-2">
+                  This will reset the database completely. All contacts, templates, and messages will be deleted.
+                  The application will reload after reset.
+                </small>
               </div>
             </div>
           </div>
@@ -728,5 +849,413 @@
   
   <!-- Main application script -->
   <script type="module" src="js/app.js"></script>
+
+  <!-- Add this at the end of the body section, before the closing body tag -->
+  <div id="whatsapp-corner-info" class="whatsapp-corner-info" draggable="true">
+    <div class="drag-handle"></div>
+    <div class="profile-container">
+      <img id="corner-profile-pic" class="corner-profile-pic" src="placeholder.png" alt="Profile">
+      <div class="corner-info-text">
+        <div id="corner-phone-name" class="corner-phone-name">Not Connected</div>
+        <div id="corner-phone-number" class="corner-phone-number"></div>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .whatsapp-corner-info {
+      position: fixed;
+      bottom: 15px;
+      left: 15px;
+      background-color: #075E54;
+      color: white;
+      border-radius: 12px;
+      padding: 6px 10px;
+      display: none;
+      z-index: 9999;
+      box-shadow: 0 3px 12px rgba(0,0,0,0.3);
+      transition: transform 0.2s ease, background-color 0.3s ease;
+      max-width: 220px;
+      cursor: move;
+      font-size: 0.9em;
+      border: 1px solid rgba(255,255,255,0.2);
+      user-select: none;
+      touch-action: none;
+    }
+    
+    /* Connection status colors */
+    .whatsapp-corner-info.connected {
+      background-color: #075E54;
+      border-color: #128C7E;
+    }
+    
+    .whatsapp-corner-info.disconnected {
+      background-color: #6b6b6b;
+      border-color: #555555;
+    }
+    
+    .whatsapp-corner-info.logged-out {
+      background-color: #9c9c9c;
+      border-color: #888888;
+      opacity: 0.85;
+    }
+    
+    .whatsapp-corner-info.dragging {
+      opacity: 0.8;
+      transform: scale(1.05);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    }
+    
+    .drag-handle {
+      position: absolute;
+      top: 2px;
+      left: 0;
+      right: 0;
+      height: 6px;
+      cursor: move;
+      border-radius: 3px;
+      background-color: rgba(255,255,255,0.15);
+      width: 40px;
+      margin: 0 auto;
+    }
+    
+    .whatsapp-corner-info:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 5px 15px rgba(0,0,0,0.4);
+    }
+    
+    .whatsapp-corner-info.connected:hover {
+      background-color: #128C7E;
+    }
+    
+    .whatsapp-corner-info.disconnected:hover {
+      background-color: #808080;
+    }
+    
+    .whatsapp-corner-info.logged-out:hover {
+      background-color: #a9a9a9;
+    }
+    
+    .whatsapp-corner-info:before {
+      content: '';
+      display: block;
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    
+    .whatsapp-corner-info.connected:before {
+      background-color: #25D366;
+    }
+    
+    .whatsapp-corner-info.disconnected:before {
+      background-color: #FFA500;
+    }
+    
+    .whatsapp-corner-info.logged-out:before {
+      background-color: #f5f5f5;
+      animation: none;
+    }
+    
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0.7); }
+      70% { box-shadow: 0 0 0 6px rgba(37, 211, 102, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(37, 211, 102, 0); }
+    }
+    
+    .profile-container {
+      display: flex;
+      align-items: center;
+      margin-top: 6px;
+    }
+    
+    .corner-profile-pic {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      object-fit: cover;
+      margin-right: 8px;
+      border: 1px solid white;
+      transition: opacity 0.3s ease;
+    }
+    
+    .whatsapp-corner-info.logged-out .corner-profile-pic {
+      opacity: 0.5;
+      filter: grayscale(100%);
+    }
+    
+    .corner-info-text {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+    
+    .corner-phone-name {
+      font-weight: bold;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    
+    .corner-phone-number {
+      font-size: 11px;
+      opacity: 0.9;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+
+  <script>
+    // Add drag functionality to the WhatsApp corner info
+    document.addEventListener('DOMContentLoaded', () => {
+      const cornerInfo = document.getElementById('whatsapp-corner-info');
+      if (!cornerInfo) return;
+      
+      let isDragging = false;
+      let offsetX = 0;
+      let offsetY = 0;
+      let moveCount = 0; // Track how many move events we've received
+      let dragStartPosition = { x: 0, y: 0 }; // Starting position
+      
+      // Load saved position from localStorage
+      function loadPosition() {
+        try {
+          const savedPosition = localStorage.getItem('whatsappCornerPosition');
+          if (savedPosition) {
+            const { left, top } = JSON.parse(savedPosition);
+            cornerInfo.style.left = left + 'px';
+            cornerInfo.style.top = top + 'px';
+            // When loading a saved position, remove bottom positioning
+            cornerInfo.style.bottom = 'auto';
+          }
+        } catch (error) {
+          console.error('Error loading WhatsApp corner position:', error);
+        }
+      }
+      
+      // Save position to localStorage
+      function savePosition() {
+        try {
+          const rect = cornerInfo.getBoundingClientRect();
+          localStorage.setItem('whatsappCornerPosition', JSON.stringify({
+            left: rect.left,
+            top: rect.top
+          }));
+        } catch (error) {
+          console.error('Error saving WhatsApp corner position:', error);
+        }
+      }
+      
+      // Handle drag start
+      cornerInfo.addEventListener('mousedown', (e) => {
+        // Only start dragging if we're on the drag handle or this is a right click
+        const isOnDragHandle = e.target.classList.contains('drag-handle');
+        const isRightClick = e.button === 2;
+        
+        if (isOnDragHandle || isRightClick || e.ctrlKey) {
+          isDragging = true;
+          cornerInfo.classList.add('dragging');
+          
+          // Store initial positions
+          dragStartPosition = { x: e.clientX, y: e.clientY };
+          moveCount = 0;
+          
+          // Calculate the offset from the mouse position to the element's top-left corner
+          const rect = cornerInfo.getBoundingClientRect();
+          offsetX = e.clientX - rect.left;
+          offsetY = e.clientY - rect.top;
+          
+          // Prevent text selection while dragging
+          e.preventDefault();
+        }
+      });
+      
+      // Handle drag
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        
+        moveCount++;
+        
+        // Calculate distance moved from start position
+        const distX = Math.abs(e.clientX - dragStartPosition.x);
+        const distY = Math.abs(e.clientY - dragStartPosition.y);
+        
+        // Only consider it a real drag if we've moved a certain distance
+        if (moveCount > 3 || distX > 5 || distY > 5) {
+          // Set a data attribute to communicate to click handlers that we're truly dragging
+          cornerInfo.setAttribute('data-is-dragging', 'true');
+          
+          // Calculate new position
+          const left = e.clientX - offsetX;
+          const top = e.clientY - offsetY;
+          
+          // Apply new position
+          cornerInfo.style.left = left + 'px';
+          cornerInfo.style.top = top + 'px';
+          cornerInfo.style.bottom = 'auto'; // Remove bottom positioning when manually positioned
+        }
+        
+        e.preventDefault();
+      });
+      
+      // Handle drag end
+      document.addEventListener('mouseup', () => {
+        if (!isDragging) return;
+        
+        // Small delay to allow click handler to check dragging state
+        setTimeout(() => {
+          cornerInfo.removeAttribute('data-is-dragging');
+        }, 100);
+        
+        isDragging = false;
+        cornerInfo.classList.remove('dragging');
+        
+        // Only save if we actually moved it
+        if (moveCount > 3) {
+          savePosition();
+        }
+      });
+      
+      // Also handle touch events for mobile
+      cornerInfo.addEventListener('touchstart', (e) => {
+        // Only start dragging on drag handle for touch
+        if (e.target.classList.contains('drag-handle')) {
+          isDragging = true;
+          cornerInfo.classList.add('dragging');
+          moveCount = 0;
+          
+          const touch = e.touches[0];
+          dragStartPosition = { x: touch.clientX, y: touch.clientY };
+          
+          const rect = cornerInfo.getBoundingClientRect();
+          offsetX = touch.clientX - rect.left;
+          offsetY = touch.clientY - rect.top;
+          
+          e.preventDefault();
+        }
+      });
+      
+      document.addEventListener('touchmove', (e) => {
+        if (!isDragging) return;
+        
+        moveCount++;
+        const touch = e.touches[0];
+        
+        // Calculate distance moved from start position
+        const distX = Math.abs(touch.clientX - dragStartPosition.x);
+        const distY = Math.abs(touch.clientY - dragStartPosition.y);
+        
+        if (moveCount > 3 || distX > 5 || distY > 5) {
+          cornerInfo.setAttribute('data-is-dragging', 'true');
+          
+          const left = touch.clientX - offsetX;
+          const top = touch.clientY - offsetY;
+          
+          cornerInfo.style.left = left + 'px';
+          cornerInfo.style.top = top + 'px';
+          cornerInfo.style.bottom = 'auto';
+        }
+        
+        e.preventDefault();
+      });
+      
+      document.addEventListener('touchend', () => {
+        if (!isDragging) return;
+        
+        setTimeout(() => {
+          cornerInfo.removeAttribute('data-is-dragging');
+        }, 100);
+        
+        isDragging = false;
+        cornerInfo.classList.remove('dragging');
+        
+        if (moveCount > 3) {
+          savePosition();
+        }
+      });
+      
+      // Add right-click context menu for reset position
+      cornerInfo.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        
+        // Create simple context menu
+        const contextMenu = document.createElement('div');
+        contextMenu.className = 'whatsapp-context-menu';
+        contextMenu.innerHTML = `
+          <div class="context-menu-item" id="reset-position">Reset Position</div>
+        `;
+        
+        // Style the context menu
+        Object.assign(contextMenu.style, {
+          position: 'fixed',
+          zIndex: '10000',
+          background: '#fff',
+          border: '1px solid #ddd',
+          borderRadius: '4px',
+          boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+          padding: '5px 0',
+          minWidth: '150px'
+        });
+        
+        // Style menu items
+        const menuItems = contextMenu.querySelectorAll('.context-menu-item');
+        menuItems.forEach(item => {
+          Object.assign(item.style, {
+            padding: '8px 12px',
+            cursor: 'pointer',
+            color: '#333',
+            fontSize: '14px'
+          });
+          
+          item.addEventListener('mouseover', () => {
+            item.style.backgroundColor = '#f5f5f5';
+          });
+          
+          item.addEventListener('mouseout', () => {
+            item.style.backgroundColor = 'transparent';
+          });
+        });
+        
+        // Position the menu
+        contextMenu.style.left = e.clientX + 'px';
+        contextMenu.style.top = e.clientY + 'px';
+        
+        // Add to DOM
+        document.body.appendChild(contextMenu);
+        
+        // Close menu when clicking outside
+        const closeContextMenu = () => {
+          if (document.body.contains(contextMenu)) {
+            document.body.removeChild(contextMenu);
+          }
+          document.removeEventListener('click', closeContextMenu);
+        };
+        
+        // Handle reset position
+        const resetButton = contextMenu.querySelector('#reset-position');
+        resetButton.addEventListener('click', () => {
+          cornerInfo.style.left = '15px';
+          cornerInfo.style.bottom = '15px';
+          cornerInfo.style.top = 'auto';
+          localStorage.removeItem('whatsappCornerPosition');
+          closeContextMenu();
+        });
+        
+        // Close on any click (with small delay to allow the current click to process)
+        setTimeout(() => {
+          document.addEventListener('click', closeContextMenu);
+        }, 100);
+      });
+      
+      // Initialize position from saved state
+      loadPosition();
+    });
+  </script>
 </body>
 </html> 

@@ -14,7 +14,7 @@ module.exports = (sequelize) => {
     },
     status: {
       type: DataTypes.ENUM,
-      values: ['SCHEDULED', 'PENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED'],
+      values: ['SCHEDULED', 'PENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELED'],
       defaultValue: 'SCHEDULED'
     },
     scheduledTime: {
@@ -39,6 +39,11 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING,
       allowNull: true
     },
+    // Save a copy of the template name for reference
+    templateNameSnapshot: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     // Track when the message was created and last updated
     createdAt: {
       type: DataTypes.DATE,
@@ -48,6 +53,12 @@ module.exports = (sequelize) => {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW
     }
+  }, {
+    // Explicitly set the table name to avoid pluralization issues
+    tableName: 'Messages',
+    // Don't pluralize table names
+    freezeTableName: true,
+    timestamps: true
   });
   
   return Message;

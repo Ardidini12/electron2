@@ -30,6 +30,12 @@ module.exports = (sequelize) => {
       type: DataTypes.DATE,
       defaultValue: DataTypes.NOW
     }
+  }, {
+    // Explicitly set the table name to avoid pluralization issues
+    tableName: 'Templates',
+    // Don't pluralize table names
+    freezeTableName: true,
+    timestamps: true
   });
   
   return Template;

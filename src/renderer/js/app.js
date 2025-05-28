@@ -110,26 +110,68 @@ async function loadAppModules() {
       notificationsModule,
       whatsAppModule,
       contactsModule,
-      helpersModule
+      helpersModule,
+      templatesModule,
+      settingsModule,
+      bulkSenderModule,
+      scheduledModule
     ] = await Promise.all([
       import('./modules/dashboard/dashboard.js'),
       import('./modules/ui/notifications.js'),
       import('./modules/whatsapp/whatsapp.js'),
       import('./modules/contacts/contacts.js'),
-      import('./modules/utils/helpers.js')
+      import('./modules/utils/helpers.js'),
+      import('./modules/templates/templates.js'),
+      import('./modules/settings/settings.js'),
+      import('./modules/bulksender/bulksender.js'),
+      import('./modules/scheduled/scheduled.js')
     ]);
     
     return {
+      // Dashboard functions
       initDashboard: dashboardModule.initDashboard,
       updateDashboardStats: dashboardModule.updateDashboardStats,
       loadRecentActivity: dashboardModule.loadRecentActivity,
+      
+      // Notifications functions
       setupNotifications: notificationsModule.setupNotifications,
       showNotification: notificationsModule.showNotification,
+      
+      // WhatsApp functions
       setupWhatsAppConnection: whatsAppModule.setupWhatsAppConnection,
       checkWhatsAppStatus: whatsAppModule.checkWhatsAppStatus,
       updateWhatsAppStatus: whatsAppModule.updateWhatsAppStatus,
+      
+      // Contacts functions
       initContacts: contactsModule.initContacts,
-      loadContacts: contactsModule.loadContacts,
+      loadContactsPaginated: contactsModule.loadContactsPaginated,
+      openContactModal: contactsModule.openContactModal,
+      openImportModal: contactsModule.openImportModal,
+      deleteContact: contactsModule.deleteContact,
+      deleteSelectedContacts: contactsModule.deleteSelectedContacts,
+      
+      // Templates functions
+      initTemplates: templatesModule.initTemplates,
+      loadTemplates: templatesModule.loadTemplates,
+      
+      // Settings functions
+      initSettings: settingsModule.initSettings,
+      refreshSettings: settingsModule.refreshSettings,
+      loadSettings: settingsModule.loadSettings,
+      getSettings: settingsModule.getSettings,
+      updateWhatsAppStatusInSettings: settingsModule.updateWhatsAppStatus,
+      destroySettings: settingsModule.destroySettings,
+      
+      // Bulk Sender functions
+      initBulkSender: bulkSenderModule.initBulkSender,
+      refreshBulkSender: bulkSenderModule.refreshBulkSender,
+      
+      // Scheduled Messages functions
+      initScheduled: scheduledModule.initScheduled,
+      loadScheduledMessages: scheduledModule.loadScheduledMessages,
+      updateMessageStatus: scheduledModule.updateMessageStatus,
+      
+      // Helpers
       helpers: helpersModule
     };
   } catch (error) {
@@ -153,6 +195,10 @@ function startApp(modules) {
   // Initialize each section
   modules.initDashboard();
   modules.initContacts();
+  modules.initTemplates();
+  modules.initSettings();
+  modules.initBulkSender();
+  modules.initScheduled();
   
   // Set up WhatsApp connection
   modules.setupWhatsAppConnection();
@@ -160,24 +206,56 @@ function startApp(modules) {
   // Check WhatsApp status
   modules.checkWhatsAppStatus();
   
+  // Set up event listener for message status updates
+  window.api.on('message-status-update', (update) => {
+    modules.updateMessageStatus(update);
+  });
+  
   // Show a notification that the app has started
-  modules.showNotification('Application Started', 'BSS Sender has been initialized successfully.', 'success', 3000);
+  modules.showNotification('Application Started', 'BSSender has been initialized successfully.', 'success', 3000);
 }
 
 /**
  * Show error screen when initialization fails
  */
 function showErrorScreen(error) {
+  // Check if this is a database error
+  const isDatabaseError = error.message && (
+    error.message.includes('database') ||
+    error.message.includes('SQLITE_ERROR') ||
+    error.message.includes('no such column') ||
+    error.message.includes('table') ||
+    error.message.includes('sequelize')
+  );
+  
+  const errorTitle = isDatabaseError ? 'Database Error Detected' : 'Error Loading Application';
+  const errorDescription = isDatabaseError 
+    ? 'There was an error with the database. This might be due to schema changes or a corrupted database file.' 
+    : 'There was an error loading the application modules. Please try restarting the application.';
+  
   document.body.innerHTML = `
     <div style="padding: 20px; text-align: center;">
-      <h1>Error Loading Application</h1>
-      <p>There was an error loading the application modules. Please try restarting the application.</p>
+      <h1>${errorTitle}</h1>
+      <p>${errorDescription}</p>
       <pre style="background: #f8f8f8; padding: 10px; text-align: left; overflow: auto; max-height: 200px;">${error.message}</pre>
-      <div style="margin-top: 20px;">
-        <button id="reload-app-error" style="padding: 10px 20px; margin-right: 10px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px;">
+      <div style="margin-top: 20px; display: flex; flex-direction: ${isDatabaseError ? 'column' : 'row'}; gap: 10px; justify-content: center;">
+        <button id="reload-app-error" style="padding: 10px 20px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 4px;">
           Reload Application
         </button>
-        <button id="force-reload-app" style="padding: 10px 20px; cursor: pointer; background: #f44336; color: white; border: none; border-radius: 4px;">
+        
+        ${isDatabaseError ? `
+          <button id="recover-database" style="padding: 10px 20px; margin-top: 10px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 4px;">
+            Recover Database (Keeps Data)
+          </button>
+          <button id="reset-database" style="padding: 10px 20px; margin-top: 10px; cursor: pointer; background: #FF9800; color: white; border: none; border-radius: 4px;">
+            Reset Database (WARNING: Deletes All Data)
+          </button>
+          <p style="margin-top: 15px; color: #f44336; font-weight: bold;">
+            Only use Reset Database as a last resort if Recovery doesn't work
+          </p>
+        ` : ''}
+        
+        <button id="force-reload-app" style="padding: 10px 20px; margin-top: ${isDatabaseError ? '20px' : '0'}; cursor: pointer; background: #f44336; color: white; border: none; border-radius: 4px;">
           Force Reload
         </button>
       </div>
@@ -196,6 +274,61 @@ function showErrorScreen(error) {
     });
   }
   
+  // Add database recovery button handler
+  if (isDatabaseError) {
+    const recoverButton = document.getElementById('recover-database');
+    if (recoverButton && window.api && window.api.recoverDatabase) {
+      recoverButton.addEventListener('click', async () => {
+        try {
+          recoverButton.disabled = true;
+          recoverButton.textContent = 'Recovering...';
+          
+          const result = await window.api.recoverDatabase();
+          
+          if (result && result.success) {
+            alert('Database recovered successfully. The application will now reload.');
+            window.location.reload();
+          } else {
+            alert(`Recovery failed: ${result.error || 'Unknown error'}`);
+            recoverButton.disabled = false;
+            recoverButton.textContent = 'Recover Database (Keeps Data)';
+          }
+        } catch (error) {
+          alert(`Error during recovery: ${error.message}`);
+          recoverButton.disabled = false;
+          recoverButton.textContent = 'Recover Database (Keeps Data)';
+        }
+      });
+    }
+    
+    const resetButton = document.getElementById('reset-database');
+    if (resetButton && window.api && window.api.resetDatabase) {
+      resetButton.addEventListener('click', async () => {
+        if (confirm('WARNING: This will delete all your data and reset the database to factory defaults. Are you absolutely sure?')) {
+          try {
+            resetButton.disabled = true;
+            resetButton.textContent = 'Resetting...';
+            
+            const result = await window.api.resetDatabase();
+            
+            if (result && result.success) {
+              alert('Database reset successfully. The application will now reload.');
+              window.location.reload();
+            } else {
+              alert(`Reset failed: ${result.error || 'Unknown error'}`);
+              resetButton.disabled = false;
+              resetButton.textContent = 'Reset Database (WARNING: Deletes All Data)';
+            }
+          } catch (error) {
+            alert(`Error during reset: ${error.message}`);
+            resetButton.disabled = false;
+            resetButton.textContent = 'Reset Database (WARNING: Deletes All Data)';
+          }
+        }
+      });
+    }
+  }
+  
   // Add event listener to force reload button
   const forceReloadButton = document.getElementById('force-reload-app');
   if (forceReloadButton) {
@@ -212,15 +345,31 @@ function setupNavigation(modules) {
   const navItems = document.querySelectorAll('.nav-item');
   const sections = document.querySelectorAll('.content-section');
   
+  // Track the currently active section
+  let currentActiveSection = document.querySelector('.content-section.active')?.id || null;
+  
   navItems.forEach(item => {
     item.addEventListener('click', () => {
       const targetId = item.getAttribute('data-target');
+      const prevSection = currentActiveSection;
+      currentActiveSection = targetId;
       
       // Update active navigation item
       navItems.forEach(nav => nav.classList.remove('active'));
       item.classList.add('active');
       
-      console.log(`Navigation: switching to section "${targetId}"`);
+      console.log(`Navigation: switching from "${prevSection}" to "${targetId}"`);
+      
+      // Clean up previous section if needed
+      if (prevSection === 'settings' && targetId !== 'settings') {
+        // Clean up settings when navigating away
+        console.log('Cleaning up settings module on navigation away');
+        try {
+          modules.destroySettings();
+        } catch (error) {
+          console.error('Error cleaning up settings module:', error);
+        }
+      }
       
       // Show target section
       sections.forEach(section => {
@@ -230,19 +379,61 @@ function setupNavigation(modules) {
           section.classList.add('active');
           console.log(`Section "${targetId}" is now active`);
           
-          // If we're switching to contacts, force reload them
-          if (targetId === 'contacts') {
-            console.log('Contacts section activated, reloading contacts...');
-            setTimeout(() => {
-              modules.loadContacts();
-            }, 100); // Small delay to ensure DOM is updated
-          }
-          
-          // If we're switching to dashboard, update stats
-          if (targetId === 'dashboard') {
-            console.log('Dashboard section activated, updating stats...');
-            modules.updateDashboardStats();
-            modules.loadRecentActivity();
+          // Perform section-specific actions when activated
+          switch (targetId) {
+            case 'contacts':
+              console.log('Contacts section activated, reloading contacts...');
+              setTimeout(() => {
+                modules.loadContactsPaginated();
+              }, 100); // Small delay to ensure DOM is updated
+              break;
+            
+            case 'templates':
+              console.log('Templates section activated, reloading templates...');
+              setTimeout(() => {
+                modules.loadTemplates();
+              }, 100); // Small delay to ensure DOM is updated
+              break;
+            
+            case 'dashboard':
+              console.log('Dashboard section activated, updating stats...');
+              modules.updateDashboardStats();
+              modules.loadRecentActivity();
+              break;
+            
+            case 'bulk-sender':
+              console.log('Bulk Sender section activated, refreshing data...');
+              setTimeout(() => {
+                modules.refreshBulkSender();
+              }, 100); // Small delay to ensure DOM is updated
+              break;
+            
+            case 'scheduled':
+              console.log('Scheduled Messages section activated, loading messages...');
+              setTimeout(() => {
+                modules.loadScheduledMessages();
+              }, 100); // Small delay to ensure DOM is updated
+              break;
+            
+            case 'settings':
+              console.log('Settings section activated, refreshing settings...');
+              // Force settings refresh when entering the view
+              setTimeout(async () => {
+                try {
+                  // Use refreshSettings instead of initSettings for more reliable UI updates
+                  if (modules.refreshSettings) {
+                    await modules.refreshSettings();
+                    console.log('Settings refreshed successfully upon tab activation');
+                  } else {
+                    // Fallback to init if refresh not available
+                    await modules.initSettings();
+                    console.log('Settings initialized successfully upon tab activation');
+                  }
+                } catch (error) {
+                  console.error('Error refreshing settings upon tab activation:', error);
+                }
+              }, 100); // Small delay to ensure DOM is updated
+              break;
           }
         }
       });
@@ -255,11 +446,43 @@ function setupNavigation(modules) {
     const targetId = currentActiveNav.getAttribute('data-target');
     console.log(`Initial active section: "${targetId}"`);
     
-    if (targetId === 'contacts') {
+    // Perform section-specific initialization based on the active section
+    switch (targetId) {
+      case 'contacts':
       // Ensure contacts are loaded on initial page load if contacts section is active
       setTimeout(() => {
-        modules.loadContacts();
+        modules.loadContactsPaginated();
       }, 500); // Longer delay for initial page load
+        break;
+      
+      case 'templates':
+        setTimeout(() => {
+          modules.loadTemplates();
+        }, 500);
+        break;
+      
+      case 'bulk-sender':
+        setTimeout(() => {
+          modules.refreshBulkSender();
+        }, 500);
+        break;
+      
+      case 'scheduled':
+        setTimeout(() => {
+          modules.loadScheduledMessages();
+        }, 500);
+        break;
+      
+      case 'settings':
+        setTimeout(() => {
+          // Use refreshSettings instead of initSettings for more reliable UI updates
+          if (modules.refreshSettings) {
+            modules.refreshSettings();
+          } else {
+            modules.initSettings();
+          }
+        }, 500);
+        break;
     }
   }
 }

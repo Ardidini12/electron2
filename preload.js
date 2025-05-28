@@ -15,6 +15,8 @@ function exposeAPI() {
     const apiObject = {
       // File operations
       showFileDialog: (options) => ipcRenderer.invoke('select-file', options),
+      showOpenDialog: (options) => ipcRenderer.invoke('show-open-dialog', options),
+      selectFile: (options) => ipcRenderer.invoke('select-file', options),
       readFile: (path, options) => ipcRenderer.invoke('read-file', path, options),
       getAppPath: () => ipcRenderer.invoke('get-app-path'),
       getStoragePath: () => ipcRenderer.invoke('get-storage-path'),
@@ -29,7 +31,19 @@ function exposeAPI() {
       deleteContactsBulk: (contactIds) => ipcRenderer.invoke('delete-contacts-bulk', contactIds),
       parseContactsFile: (filePath, fileType) => ipcRenderer.invoke('parse-contacts-file', filePath, fileType),
       importContactsFromData: (contacts, source) => ipcRenderer.invoke('import-contacts-from-data', contacts, source),
-      exportContacts: (format, path) => ipcRenderer.invoke('export-contacts', format, path),
+      importContacts: (filePath, fileType) => ipcRenderer.invoke('import-contacts', filePath, fileType),
+      exportContacts: (format) => {
+        switch (format.toLowerCase()) {
+          case 'json':
+            return ipcRenderer.invoke('export-contacts-json');
+          case 'csv':
+            return ipcRenderer.invoke('export-contacts-csv');
+          case 'excel':
+            return ipcRenderer.invoke('export-contacts-excel');
+          default:
+            return Promise.reject(new Error(`Unsupported export format: ${format}`));
+        }
+      },
       checkDuplicatePhone: (phone, originalPhone) => ipcRenderer.invoke('check-duplicate-phone', phone, originalPhone),
       
       // Template operations
@@ -44,16 +58,18 @@ function exposeAPI() {
       getWhatsAppStatus: () => ipcRenderer.invoke('get-whatsapp-status'),
       disconnectWhatsApp: (deleteSession) => ipcRenderer.invoke('disconnect-whatsapp', deleteSession),
       getWhatsAppInfo: () => ipcRenderer.invoke('get-whatsapp-info'),
+      refreshWhatsAppInfo: () => ipcRenderer.invoke('refresh-whatsapp-info'),
+      setAutoConnectWhatsApp: (enabled) => ipcRenderer.invoke('set-auto-connect-whatsapp', enabled),
+      getAutoConnectWhatsApp: () => ipcRenderer.invoke('get-auto-connect-whatsapp'),
       
       // Message operations
-      sendMessage: (message) => ipcRenderer.invoke('send-message', message),
-      scheduleMessages: (messages) => ipcRenderer.invoke('schedule-messages', messages),
-      getScheduledMessages: () => ipcRenderer.invoke('get-scheduled-messages'),
+      getScheduledMessages: (status) => ipcRenderer.invoke('get-scheduled-messages', status),
       getScheduledMessage: (id) => ipcRenderer.invoke('get-scheduled-message', id),
       updateScheduledMessage: (id, message) => ipcRenderer.invoke('update-scheduled-message', id, message),
       deleteScheduledMessage: (id) => ipcRenderer.invoke('delete-scheduled-message', id),
       cancelScheduledMessage: (id) => ipcRenderer.invoke('cancel-scheduled-message', id),
-      retryFailedMessage: (id) => ipcRenderer.invoke('retry-failed-message', id),
+      retryMessage: (id) => ipcRenderer.invoke('retry-message', id),
+      scheduleMessages: (config) => ipcRenderer.invoke('schedule-messages', config),
       
       // Settings operations
       getSettings: () => ipcRenderer.invoke('get-settings'),
@@ -62,6 +78,10 @@ function exposeAPI() {
       // Debug operations
       reloadApp: () => ipcRenderer.invoke('reload-app'),
       isApiAvailable: () => true, // This will always be true if the API is exposed
+      
+      // Database management
+      resetDatabase: () => ipcRenderer.invoke('reset-database'),
+      recoverDatabase: () => ipcRenderer.invoke('recover-database'),
       
       // Event listeners
       on: (channel, callback) => {
@@ -110,7 +130,23 @@ function exposeAPI() {
         if (validChannels.includes(channel)) {
           ipcRenderer.removeAllListeners(channel);
         }
-      }
+      },
+      
+      // Contacts
+      getContactsPaginated: (page, limit, search) => ipcRenderer.invoke('get-contacts-paginated', page, limit, search),
+      getContact: (id) => ipcRenderer.invoke('get-contact', id),
+      createContact: (contact) => ipcRenderer.invoke('add-contact', contact),
+      updateContact: (id, contact) => ipcRenderer.invoke('update-contact', id, contact),
+      deleteContact: (id) => ipcRenderer.invoke('delete-contact', id),
+      importContacts: (filePath, fileType) => ipcRenderer.invoke('import-contacts', filePath, fileType),
+      getContactsCount: () => ipcRenderer.invoke('get-contacts-count'),
+      exportContactsJson: () => ipcRenderer.invoke('export-contacts-json'),
+      exportContactsCsv: () => ipcRenderer.invoke('export-contacts-csv'),
+      exportContactsExcel: () => ipcRenderer.invoke('export-contacts-excel'),
+      deleteAllContacts: () => ipcRenderer.invoke('delete-all-contacts'),
+      deleteContacts: (ids) => ipcRenderer.invoke('delete-contacts', ids),
+      parseContactsFile: (filePath, fileType) => ipcRenderer.invoke('parse-contacts-file', filePath, fileType),
+      importContactsFromData: (contacts, source) => ipcRenderer.invoke('import-contacts-from-data', contacts, source)
     };
     
     // Expose the API object to the renderer

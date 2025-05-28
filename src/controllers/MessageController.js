@@ -1,9 +1,10 @@
-const { sequelize, models } = require('../database/db');
+const { sequelize, models, isDatabaseInitialized } = require('../database/db');
 const { Op } = require('sequelize');
 const path = require('path');
 const cron = require('cron');
 const whatsAppService = require('../services/WhatsAppService');
 const moment = require('moment');
+const fs = require('fs');
 
 const Message = models.Message;
 const Contact = models.Contact;
@@ -17,81 +18,147 @@ class MessageController {
   constructor() {
     this.scheduledJobs = {};
     this.mainCronJob = null;
+    this.isProcessingMessages = false;
+    this.messageQueue = [];
+    this.lastMessageSentTime = null;
+    this.consecutiveErrors = 0;
+    this.MAX_CONSECUTIVE_ERRORS = 5;
   }
 
   /**
-   * Schedule messages for sending
-   * @param {Object} config - Schedule configuration
-   * @returns {Promise<Object>} - Schedule result
+   * Check if database is initialized
+   * @private
+   * @throws {Error} - If database is not initialized
+   */
+  _checkDatabaseInitialized() {
+    if (!isDatabaseInitialized()) {
+      throw new Error('Database is not initialized. Please wait for database initialization to complete.');
+    }
+  }
+
+  /**
+   * Schedule messages to be sent
+   * @param {Object} config - Configuration for scheduling
+   * @param {Array} config.contacts - Contacts to send messages to
+   * @param {string} config.templateId - Template ID to use
+   * @param {string} config.scheduledTime - ISO string of when to schedule the message
+   * @returns {Promise<Object>} - Result of scheduling
    */
   async scheduleMessages(config) {
-    const { contactIds, templateId, scheduleTime, useSettingsSchedule } = config;
-    
     try {
-      // Get template
-      const template = await Template.findByPk(templateId);
-      if (!template) {
-        throw new Error(`Template with ID ${templateId} not found`);
+      this._checkDatabaseInitialized();
+      
+      console.log('Scheduling messages with config:', config);
+      
+      // Validate required config
+      if (!config.contacts || !Array.isArray(config.contacts) || config.contacts.length === 0) {
+        return {
+          success: false,
+          error: 'No contacts provided for scheduling'
+        };
       }
       
-      // Get contacts
-      const contacts = await Contact.findAll({
-        where: {
-          id: {
-            [Op.in]: contactIds
+      if (!config.templateId) {
+        return {
+          success: false,
+          error: 'Template ID is required'
+        };
+      }
+      
+      // Find the template
+      const template = await Template.findByPk(config.templateId);
+      if (!template) {
+        return {
+          success: false,
+          error: `Template with ID ${config.templateId} not found`
+        };
+      }
+      
+      // Create a complete snapshot of the template at scheduling time
+      const templateSnapshot = {
+        id: template.id,
+        content: template.content,
+        imagePath: template.imagePath,
+        name: template.name
+      };
+      
+      // Parse scheduled time
+      let scheduledTime;
+      if (config.scheduledTime) {
+        scheduledTime = new Date(config.scheduledTime);
+        if (isNaN(scheduledTime.getTime())) {
+          return {
+            success: false,
+            error: 'Invalid scheduled time'
+          };
+        }
+      } else {
+        // If no scheduled time is provided, use current time
+        scheduledTime = new Date();
+      }
+      
+      // Create a message for each contact
+      const scheduled = [];
+      const failed = [];
+      
+      // Use a transaction to ensure all messages are created atomically
+      await sequelize.transaction(async (transaction) => {
+        for (const contact of config.contacts) {
+          try {
+            // Find the contact by ID
+            const contactRecord = await Contact.findByPk(contact.id, { transaction });
+            if (!contactRecord) {
+              failed.push({
+                contact,
+                error: `Contact with ID ${contact.id} not found`
+              });
+              continue;
+            }
+            
+            // Create the message with complete template snapshot
+            const message = await Message.create({
+              status: 'SCHEDULED',
+              scheduledTime,
+              contentSnapshot: templateSnapshot.content,
+              imagePathSnapshot: templateSnapshot.imagePath,
+              templateNameSnapshot: templateSnapshot.name,
+              ContactId: contactRecord.id,
+              TemplateId: template.id
+            }, { transaction });
+            
+            scheduled.push({
+              id: message.id,
+              scheduledTime: message.scheduledTime,
+              status: message.status
+            });
+          } catch (error) {
+            console.error(`Error scheduling message for contact ${contact.id}:`, error);
+            failed.push({
+              contact,
+              error: error.message
+            });
           }
         }
       });
       
-      if (contacts.length === 0) {
-        throw new Error('No valid contacts found');
-      }
+      // Ensure the scheduler is running
+      this.startScheduler();
       
-      // Determine schedule time
-      let actualScheduleTime;
-      
-      if (useSettingsSchedule) {
-        // Get settings
-        const settings = await this.getSettings();
-        
-        // Set schedule time to current time + message interval (for immediate processing)
-        const now = new Date();
-        actualScheduleTime = new Date(now.getTime() + (settings.messageInterval * 1000));
-      } else {
-        // Use provided schedule time
-        actualScheduleTime = scheduleTime;
-      }
-      
-      // Create message records
-      const messages = [];
-      
-      for (const contact of contacts) {
-        const message = await Message.create({
-          status: 'SCHEDULED',
-          scheduledTime: actualScheduleTime,
-          contentSnapshot: template.content,
-          imagePathSnapshot: template.imagePath,
-          ContactId: contact.id,
-          TemplateId: template.id
-        });
-        
-        messages.push(message);
-      }
-      
-      // Check if scheduler is running, if not, start it
-      await this.startScheduler();
-      
+      // Return results
       return {
-        scheduled: messages.length,
-        messages: messages.map(m => ({
-          id: m.id,
-          scheduledTime: m.scheduledTime,
-          status: m.status
-        }))
+        success: true,
+        scheduled,
+        failed,
+        totalContacts: config.contacts.length,
+        scheduledCount: scheduled.length,
+        failedCount: failed.length
       };
     } catch (error) {
       console.error('Error scheduling messages:', error);
-      throw error;
+      return {
+        success: false,
+        error: error.message
+      };
     }
   }
 
@@ -102,18 +169,38 @@ class MessageController {
    */
   async getScheduledMessages(status = null) {
     try {
+      this._checkDatabaseInitialized();
+      
       const query = {
         include: [
           { model: Contact },
           { model: Template }
-        ]
+        ],
+        order: [['scheduledTime', 'ASC']]
       };
       
       if (status) {
         query.where = { status };
       }
       
-      return await Message.findAll(query);
+      // Get messages with associations
+      const messages = await Message.findAll(query);
+      
+      // Convert to plain objects to avoid cloning issues with Sequelize models
+      return messages.map(message => {
+        const plainMessage = message.toJSON();
+        
+        // Ensure contact and template are properly serialized
+        if (plainMessage.Contact) {
+          plainMessage.Contact = message.Contact.toJSON();
+        }
+        
+        if (plainMessage.Template) {
+          plainMessage.Template = message.Template.toJSON();
+        }
+        
+        return plainMessage;
+      });
     } catch (error) {
       console.error('Error fetching scheduled messages:', error);
       throw error;
@@ -122,50 +209,63 @@ class MessageController {
 
   /**
    * Cancel a scheduled message
-   * @param {number} id - Message ID
-   * @returns {Promise<boolean>} - True if canceled successfully
+   * @param {number} id - Message ID to cancel
+   * @returns {Promise<Object>} - Result of cancellation
    */
   async cancelScheduledMessage(id) {
     try {
+      this._checkDatabaseInitialized();
+      
       const message = await Message.findByPk(id);
-      
       if (!message) {
-        throw new Error(`Message with ID ${id} not found`);
+        return { success: false, error: `Message with ID ${id} not found` };
       }
       
-      if (message.status === 'SCHEDULED' || message.status === 'PENDING') {
-        await message.update({ status: 'CANCELED' });
-        return true;
-      } else {
-        throw new Error(`Cannot cancel message with status ${message.status}`);
+      if (message.status !== 'SCHEDULED' && message.status !== 'PENDING') {
+        return { 
+          success: false, 
+          error: `Message is already in ${message.status} status and cannot be canceled` 
+        };
       }
+      
+      await message.update({ status: 'CANCELED' });
+      
+      return { success: true, message: `Message ${id} has been canceled` };
     } catch (error) {
-      console.error(`Error canceling message with ID ${id}:`, error);
-      throw error;
+      console.error(`Error canceling message ${id}:`, error);
+      return { success: false, error: error.message };
     }
   }
 
   /**
-   * Update message status
-   * @param {string} externalId - External message ID
+   * Update a message status by its external ID
+   * @param {string} externalId - External message ID from WhatsApp
    * @param {string} status - New status
-   * @returns {Promise<boolean>} - True if updated successfully
+   * @returns {Promise<boolean>} - Success status
    */
   async updateMessageStatus(externalId, status) {
     try {
+      this._checkDatabaseInitialized();
+      
       const message = await Message.findOne({
         where: { externalId }
       });
       
       if (!message) {
-        throw new Error(`Message with external ID ${externalId} not found`);
+        console.error(`Message with external ID ${externalId} not found`);
+        return false;
       }
       
-      await message.update({ status });
+      await message.update({ 
+        status,
+        updatedAt: new Date() 
+      });
+      
+      console.log(`Updated message ${externalId} status to ${status}`);
       return true;
     } catch (error) {
       console.error(`Error updating status for message with external ID ${externalId}:`, error);
-      throw error;
+      return false;
     }
   }
 
@@ -174,7 +274,16 @@ class MessageController {
    * @returns {Promise<Object>} - Processing result
    */
   async processPendingMessages() {
+    if (this.isProcessingMessages) {
+      console.log('Already processing messages, skipping this run');
+      return { processed: 0, reason: 'Already processing messages' };
+    }
+    
+    this.isProcessingMessages = true;
+    
     try {
+      this._checkDatabaseInitialized();
+      
       // Get settings
       const settings = await this.getSettings();
       
@@ -185,22 +294,59 @@ class MessageController {
       
       // Check if current time is within allowed time range
       if (!this.isWithinTimeRange(settings)) {
+        console.log('Current time is outside allowed time range');
         return { processed: 0, reason: 'Current time is outside allowed time range' };
       }
       
       // Check if today is an allowed day
       if (!this.isAllowedDay(settings)) {
+        console.log('Current day is not allowed for sending');
         return { processed: 0, reason: 'Current day is not allowed for sending' };
       }
       
       // Check WhatsApp connection
       const whatsAppStatus = whatsAppService.getStatus();
       if (!whatsAppStatus.isConnected) {
-        return { processed: 0, reason: 'WhatsApp is not connected' };
+        console.log('WhatsApp not connected, attempting to initialize...');
+        
+        // Try to initialize WhatsApp if not connected
+        try {
+          await whatsAppService.initialize();
+          // Wait a moment for connection
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        } catch (e) {
+          console.error('Failed to initialize WhatsApp during message processing:', e);
+          return { processed: 0, reason: 'WhatsApp not connected' };
+        }
+        
+        // Check again if connected
+        const updatedStatus = whatsAppService.getStatus();
+        if (!updatedStatus.isConnected) {
+          console.log('WhatsApp still not connected after initialization attempt');
+          return { processed: 0, reason: 'WhatsApp not connected' };
+        }
       }
       
-      // Get pending messages
-      const pendingMessages = await Message.findAll({
+      // Update scheduled messages to pending if their time has come
+      const updatedCount = await this.updateScheduledToPending();
+      if (updatedCount > 0) {
+        console.log(`Updated ${updatedCount} scheduled messages to pending status`);
+      }
+      
+      // Check if we need to respect the message interval timing
+      if (this.lastMessageSentTime) {
+        const now = new Date();
+        const elapsedSeconds = (now - this.lastMessageSentTime) / 1000;
+        const requiredInterval = settings.messageInterval || 45;
+        
+        if (elapsedSeconds < requiredInterval) {
+          console.log(`Not enough time elapsed since last message (${elapsedSeconds.toFixed(1)}s < ${requiredInterval}s)`);
+          return { processed: 0, reason: 'Message interval not reached' };
+        }
+      }
+      
+      // Get one pending message
+      const pendingMessage = await Message.findOne({
         where: {
           status: 'PENDING',
           scheduledTime: {
@@ -211,57 +357,129 @@ class MessageController {
           { model: Contact },
           { model: Template }
         ],
-        order: [['scheduledTime', 'ASC']],
-        limit: 1 // Process one message at a time to respect interval
+        order: [['scheduledTime', 'ASC']]
       });
       
-      if (pendingMessages.length === 0) {
-        // No pending messages, check if there are scheduled messages to set to pending
-        await this.updateScheduledToPending();
+      if (!pendingMessage) {
         return { processed: 0, reason: 'No pending messages' };
       }
       
-      // Process the message
-      const message = pendingMessages[0];
+      console.log(`Processing message ${pendingMessage.id} to ${pendingMessage.Contact?.phoneNumber || 'Unknown'}`);
       
       try {
-        // Send message based on whether it has an image
-        let result;
+        // Mark as sending
+        await pendingMessage.update({ status: 'SENDING' });
         
-        if (message.imagePathSnapshot) {
-          result = await whatsAppService.sendImageMessage(
-            message.Contact.phoneNumber,
-            message.imagePathSnapshot,
-            message.contentSnapshot
-          );
-        } else {
-          result = await whatsAppService.sendTextMessage(
-            message.Contact.phoneNumber,
-            message.contentSnapshot
-          );
+        // Get contact data
+        const contact = pendingMessage.Contact || await Contact.findByPk(pendingMessage.ContactId);
+        if (!contact || !contact.phoneNumber) {
+          throw new Error('Contact information missing');
         }
         
-        // Update message with external ID and status
-        await message.update({
+        // Use snapshot content and personalize it
+        let content = pendingMessage.contentSnapshot || '';
+        const imagePath = pendingMessage.imagePathSnapshot;
+        
+        if (content && contact) {
+          content = this.personalizeContent(content, contact);
+        }
+        
+        // Check if imagePath exists (if specified)
+        if (imagePath && !fs.existsSync(imagePath)) {
+          console.warn(`Image file not found: ${imagePath}, sending as text-only message`);
+        }
+        
+        // Send message
+        let result;
+        if (imagePath && fs.existsSync(imagePath)) {
+          console.log(`Sending image message to ${contact.phoneNumber}`);
+          result = await whatsAppService.sendImageMessage(contact.phoneNumber, imagePath, content);
+        } else {
+          console.log(`Sending text message to ${contact.phoneNumber}`);
+          result = await whatsAppService.sendTextMessage(contact.phoneNumber, content);
+        }
+        
+        // Update message status
+        await pendingMessage.update({
           status: 'SENT',
-          externalId: result.id,
+          externalId: result.externalId,
           sentTime: new Date()
         });
         
-        return { processed: 1, messageId: message.id };
+        // Update last message sent time
+        this.lastMessageSentTime = new Date();
+        
+        // Reset consecutive errors counter on success
+        this.consecutiveErrors = 0;
+        
+        console.log(`Message ${pendingMessage.id} sent successfully`);
+        return { processed: 1, messageIds: [pendingMessage.id] };
+        
       } catch (error) {
-        // Update message with failure
-        await message.update({
+        console.error(`Error sending message ${pendingMessage.id}:`, error);
+        
+        // Increment consecutive errors counter
+        this.consecutiveErrors++;
+        
+        // Mark as failed or retry based on error
+        const shouldRetry = this.shouldRetryMessage(error);
+        
+        if (shouldRetry && this.consecutiveErrors < this.MAX_CONSECUTIVE_ERRORS) {
+          // Put back to PENDING state for retry
+          await pendingMessage.update({
+            status: 'PENDING',
+            failureReason: `Retry attempt: ${error.message}`
+          });
+          
+          console.log(`Message ${pendingMessage.id} marked for retry`);
+          return { processed: 0, retrying: 1 };
+        } else {
+          // Mark as permanently failed
+        await pendingMessage.update({
           status: 'FAILED',
           failureReason: error.message
         });
         
-        return { processed: 0, failed: 1, reason: error.message };
+          console.log(`Message ${pendingMessage.id} marked as failed`);
+        return { processed: 0, failed: 1, errors: [error.message] };
+        }
       }
+      
     } catch (error) {
       console.error('Error processing pending messages:', error);
       return { processed: 0, error: error.message };
+    } finally {
+      this.isProcessingMessages = false;
     }
+  }
+
+  /**
+   * Determine if a message should be retried based on the error type
+   * @param {Error} error - The error that occurred
+   * @returns {boolean} - Whether to retry
+   */
+  shouldRetryMessage(error) {
+    const errorMessage = error.message?.toLowerCase() || '';
+    
+    // Don't retry if the problem is with the phone number
+    if (errorMessage.includes('not registered') || 
+        errorMessage.includes('invalid phone')) {
+      return false;
+    }
+    
+    // Don't retry if it's a content problem
+    if (errorMessage.includes('invalid message') || 
+        errorMessage.includes('image file not found')) {
+      return false;
+    }
+    
+    // Retry for connection, auth, and other transient errors
+    return errorMessage.includes('not connected') || 
+           errorMessage.includes('failed to connect') ||
+           errorMessage.includes('network') ||
+           errorMessage.includes('timeout') ||
+           errorMessage.includes('disconnected') ||
+           errorMessage.includes('authentication');
   }
 
   /**
@@ -270,6 +488,8 @@ class MessageController {
    */
   async updateScheduledToPending() {
     try {
+      this._checkDatabaseInitialized();
+      
       const result = await Message.update(
         { status: 'PENDING' },
         {
@@ -313,7 +533,17 @@ class MessageController {
       this.mainCronJob = new cron.CronJob(
         `*/${interval} * * * * *`, // Run every X seconds
         async () => {
-          await this.processPendingMessages();
+          try {
+            console.log(`Scheduler running at ${new Date().toISOString()} with interval ${interval}s`);
+            const result = await this.processPendingMessages();
+            if (result.processed > 0) {
+              console.log(`Successfully processed ${result.processed} message(s)`);
+            } else if (result.reason) {
+              console.log(`No messages processed: ${result.reason}`);
+            }
+          } catch (error) {
+            console.error('Error in scheduler job:', error);
+          }
         },
         null, // onComplete
         true, // start
@@ -341,46 +571,52 @@ class MessageController {
   }
 
   /**
-   * Get or create schedule settings
-   * @returns {Promise<Object>} - Settings object
+   * Get the schedule settings
+   * @returns {Promise<Object>} - Schedule settings
    */
   async getSettings() {
     try {
-      // Get first settings record or create default
+      this._checkDatabaseInitialized();
+      
+      // Get the first settings record or create default
       let settings = await ScheduleSettings.findOne();
       
       if (!settings) {
-        console.log('No settings found in database, creating default settings');
+        console.log('No schedule settings found, creating default settings');
         settings = await ScheduleSettings.create({
-          activeDays: [1, 2, 3, 4, 5], // Monday to Friday
-          startTime: 9 * 60, // 9:00 AM
-          endTime: 17 * 60, // 5:00 PM
-          messageInterval: 45, // 45 seconds
-          isActive: false // Disabled by default
+          activeDays: [1, 2, 3, 4, 5], // Mon-Fri
+          startTime: 540, // 9:00 AM (in minutes)
+          endTime: 1020, // 5:00 PM (in minutes)
+          messageInterval: 45, // seconds
+          isActive: false
         });
-        console.log('Default settings created:', settings.toJSON());
-      } else {
-        console.log('Retrieved existing settings from database');
       }
       
-      // Ensure activeDays is properly parsed
-      try {
-        if (typeof settings.activeDays === 'string') {
+      // Ensure the activeDays is properly parsed (sometimes stored as string)
+      if (typeof settings.activeDays === 'string') {
+        try {
           settings.activeDays = JSON.parse(settings.activeDays);
+        } catch (e) {
+          console.error('Error parsing activeDays setting:', e);
+          settings.activeDays = [1, 2, 3, 4, 5]; // Default to Mon-Fri
         }
-      } catch (parseError) {
-        console.error('Error parsing activeDays, using default:', parseError);
-        settings.activeDays = [1, 2, 3, 4, 5]; // Use default if parsing fails
+      }
+      
+      // Ensure activeDays is an array
+      if (!Array.isArray(settings.activeDays)) {
+        console.warn('activeDays setting is not an array, fixing it');
+        settings.activeDays = [1, 2, 3, 4, 5]; // Default to Mon-Fri
       }
       
       return settings;
     } catch (error) {
-      console.error('Error getting settings:', error);
+      console.error('Error getting schedule settings:', error);
+      
       // Return default settings in case of error
       return {
         activeDays: [1, 2, 3, 4, 5],
-        startTime: 9 * 60,
-        endTime: 17 * 60,
+        startTime: 540,
+        endTime: 1020,
         messageInterval: 45,
         isActive: false
       };
@@ -394,55 +630,65 @@ class MessageController {
    */
   async updateSettings(settingsData) {
     try {
-      // Get current settings
-      let settings = await this.getSettings();
+      this._checkDatabaseInitialized();
       
-      // Make a copy of the original settings to check for changes
-      const originalSettings = { ...settings.toJSON() };
-      
-      // Log the settings we're about to update
-      console.log('Updating settings with:', settingsData);
-      console.log('Original settings:', originalSettings);
-      
-      // Ensure activeDays is handled properly
-      if (settingsData.activeDays) {
-        // Make sure it's an array
-        if (!Array.isArray(settingsData.activeDays)) {
-          if (typeof settingsData.activeDays === 'string') {
-            try {
-              settingsData.activeDays = JSON.parse(settingsData.activeDays);
-            } catch (e) {
-              console.error('Error parsing activeDays from string:', e);
-              delete settingsData.activeDays; // Don't update if invalid
-            }
-          } else {
-            delete settingsData.activeDays; // Don't update if invalid
-          }
-        }
+      // Validate settings
+      if (settingsData.messageInterval !== undefined && 
+          (settingsData.messageInterval < 1 || settingsData.messageInterval > 3600)) {
+        throw new Error('Message interval must be between 1 and 3600 seconds');
       }
       
-      // Update settings
-      await settings.update(settingsData);
-      
-      // Refresh to ensure we have the latest data
-      settings = await ScheduleSettings.findOne();
-      
-      console.log('Updated settings:', settings.toJSON());
-      
-      // Check if we need to restart the scheduler
-      const needsRestart = 
-        (settingsData.messageInterval && settingsData.messageInterval !== originalSettings.messageInterval) ||
-        (settingsData.isActive !== undefined && settingsData.isActive !== originalSettings.isActive);
-      
-      if (needsRestart && this.mainCronJob) {
-        console.log('Restarting scheduler due to settings changes');
-        this.stopScheduler();
-        await this.startScheduler();
+      if (settingsData.startTime !== undefined && 
+          (settingsData.startTime < 0 || settingsData.startTime > 1439)) {
+        throw new Error('Start time must be between 0 and 1439 minutes');
       }
+      
+      if (settingsData.endTime !== undefined && 
+          (settingsData.endTime < 0 || settingsData.endTime > 1439)) {
+        throw new Error('End time must be between 0 and 1439 minutes');
+      }
+      
+      if (settingsData.activeDays !== undefined && !Array.isArray(settingsData.activeDays)) {
+        throw new Error('Active days must be an array');
+      }
+      
+      // Get existing settings
+      let settings = await ScheduleSettings.findOne();
+      
+      if (!settings) {
+        // Create new settings if none exist
+        settings = await ScheduleSettings.create({
+          activeDays: settingsData.activeDays || [1, 2, 3, 4, 5],
+          startTime: settingsData.startTime || 540,
+          endTime: settingsData.endTime || 1020,
+          messageInterval: settingsData.messageInterval || 45,
+          isActive: settingsData.isActive !== undefined ? settingsData.isActive : false
+        });
+      } else {
+        // Update existing settings with forced persistence
+        console.log('Updating settings with:', settingsData);
+        
+        // First, update all fields directly
+        settings.activeDays = settingsData.activeDays !== undefined ? settingsData.activeDays : settings.activeDays;
+        settings.startTime = settingsData.startTime !== undefined ? settingsData.startTime : settings.startTime;
+        settings.endTime = settingsData.endTime !== undefined ? settingsData.endTime : settings.endTime;
+        settings.messageInterval = settingsData.messageInterval !== undefined ? settingsData.messageInterval : settings.messageInterval;
+        settings.isActive = settingsData.isActive !== undefined ? settingsData.isActive : settings.isActive;
+        
+        // Force save to ensure persistence
+        await settings.save();
+        
+        // Reload to verify we have the latest data
+        await settings.reload();
+        console.log('Settings after save:', settings.toJSON());
+      }
+      
+      // Restart scheduler with new settings
+      await this.startScheduler();
       
       return settings;
     } catch (error) {
-      console.error('Error updating settings:', error);
+      console.error('Error updating schedule settings:', error);
       throw error;
     }
   }
@@ -450,26 +696,165 @@ class MessageController {
   /**
    * Check if current time is within allowed time range
    * @param {Object} settings - Schedule settings
-   * @returns {boolean} - True if within range
+   * @returns {boolean} - Whether current time is allowed
    */
   isWithinTimeRange(settings) {
-    const now = moment();
-    const minutes = now.hours() * 60 + now.minutes();
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
     
-    return minutes >= settings.startTime && minutes <= settings.endTime;
+    // If settings aren't valid, default to false
+    if (!settings || typeof settings.startTime !== 'number' || typeof settings.endTime !== 'number') {
+      return false;
+    }
+    
+    return currentMinutes >= settings.startTime && currentMinutes <= settings.endTime;
   }
 
   /**
-   * Check if current day is allowed for sending
+   * Check if today is an allowed day
    * @param {Object} settings - Schedule settings
-   * @returns {boolean} - True if allowed
+   * @returns {boolean} - Whether today is allowed
    */
   isAllowedDay(settings) {
-    const now = moment();
-    const day = now.day() === 0 ? 7 : now.day(); // Convert Sunday from 0 to 7
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
     
-    return settings.activeDays.includes(day);
+    // If settings aren't valid, default to false
+    if (!settings || !Array.isArray(settings.activeDays)) {
+      return false;
+    }
+    
+    return settings.activeDays.includes(dayOfWeek);
+  }
+
+  /**
+   * Personalize message content with contact details
+   * @param {string} content - Template content
+   * @param {Object} contact - Contact data
+   * @returns {string} - Personalized content
+   */
+  personalizeContent(content, contact) {
+    if (!content) return '';
+    if (!contact) return content;
+    
+    try {
+      let personalized = content;
+      
+      // Replace variables with contact fields
+      const fields = {
+        '{firstName}': contact.firstName || '',
+        '{lastName}': contact.lastName || '',
+        '{name}': this.getFullName(contact) || '',
+        '{phone}': contact.phoneNumber || '',
+        '{email}': contact.email || '',
+        '{company}': contact.company || ''
+      };
+      
+      // Custom fields if they exist
+      if (contact.customFields) {
+        let customFields;
+        
+        // Parse custom fields if they're stored as a string
+        if (typeof contact.customFields === 'string') {
+          try {
+            customFields = JSON.parse(contact.customFields);
+          } catch (e) {
+            console.error('Error parsing custom fields:', e);
+            customFields = {};
+          }
+        } else {
+          customFields = contact.customFields;
+        }
+        
+        // Add custom fields to replacement
+        if (customFields && typeof customFields === 'object') {
+          Object.keys(customFields).forEach(key => {
+            fields[`{${key}}`] = customFields[key] || '';
+          });
+        }
+      }
+      
+      // Perform replacements
+      Object.keys(fields).forEach(key => {
+        personalized = personalized.replace(new RegExp(key, 'g'), fields[key]);
+      });
+      
+      return personalized;
+    } catch (error) {
+      console.error('Error personalizing content:', error);
+      return content;
+    }
+  }
+
+  /**
+   * Get full name from contact
+   * @param {Object} contact - Contact data
+   * @returns {string} - Full name
+   */
+  getFullName(contact) {
+    const firstName = contact.firstName || '';
+    const lastName = contact.lastName || '';
+    
+    if (firstName && lastName) {
+      return `${firstName} ${lastName}`;
+    } else if (firstName) {
+      return firstName;
+    } else if (lastName) {
+      return lastName;
+    } else {
+      return '';
+    }
+  }
+  
+  /**
+   * Retry a failed message
+   * @param {number} id - Message ID to retry
+   * @returns {Promise<Object>} - Result of retry
+   */
+  async retryMessage(id) {
+    try {
+      this._checkDatabaseInitialized();
+      
+      const message = await Message.findByPk(id, {
+        include: [{ model: Contact }, { model: Template }]
+      });
+      
+      if (!message) {
+        return { success: false, error: `Message with ID ${id} not found` };
+      }
+      
+      if (message.status !== 'FAILED') {
+        return { 
+          success: false, 
+          error: `Message with ID ${id} is not in FAILED status (current: ${message.status})` 
+        };
+      }
+      
+      // Check if we have contact info
+      if (!message.Contact && !message.ContactId) {
+        return { success: false, error: 'Message has no associated contact' };
+      }
+      
+      // Update status to PENDING to allow scheduler to pick it up
+      await message.update({ 
+        status: 'PENDING',
+        failureReason: `Retry initiated at ${new Date().toISOString()}`
+      });
+      
+      // Make sure scheduler is running
+      this.startScheduler();
+      
+      return { 
+        success: true, 
+        message: `Message ${id} has been queued for retry` 
+      };
+    } catch (error) {
+      console.error(`Error retrying message ${id}:`, error);
+      return { success: false, error: error.message };
+    }
   }
 }
 
-module.exports = new MessageController(); 
+// Export singleton instance
+const messageController = new MessageController();
+module.exports = messageController; 

@@ -1,9 +1,10 @@
-const { sequelize, models } = require('../database/db');
+const { sequelize, models, isDatabaseInitialized } = require('../database/db');
 const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
 const xlsx = require('xlsx');
 const csvParser = require('csv-parser');
+const { app } = require('electron');
 
 const Contact = models.Contact;
 
@@ -11,6 +12,17 @@ const Contact = models.Contact;
  * ContactController handles all contact-related operations
  */
 class ContactController {
+  /**
+   * Check if database is initialized
+   * @private
+   * @throws {Error} - If database is not initialized
+   */
+  _checkDatabaseInitialized() {
+    if (!isDatabaseInitialized()) {
+      throw new Error('Database not initialized');
+    }
+  }
+
   /**
    * Get paginated contacts with search capabilities
    * @param {number} page - Page number (1-based)
@@ -20,6 +32,8 @@ class ContactController {
    */
   async getContactsPaginated(page = 1, limit = 50, search = '') {
     try {
+      this._checkDatabaseInitialized();
+      
       console.log(`Getting paginated contacts: page ${page}, limit ${limit}, search: "${search}"`);
       
       // Build the query conditions
@@ -86,6 +100,8 @@ class ContactController {
    */
   async getAllContacts(source = null) {
     try {
+      this._checkDatabaseInitialized();
+      
       console.log(`Getting all contacts${source ? ` with source: ${source}` : ''}`);
       
       // Build the query
@@ -116,12 +132,219 @@ class ContactController {
   }
 
   /**
+   * Get the total count of contacts
+   * @returns {Promise<Object>} - Object containing the count
+   */
+  async getContactsCount() {
+    try {
+      this._checkDatabaseInitialized();
+      
+      const count = await Contact.count();
+      return { count };
+    } catch (error) {
+      console.error('Error getting contacts count:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Export contacts to a JSON file
+   * @returns {Promise<Object>} - Object with success status and file path
+   */
+  async exportContactsAsJson() {
+    try {
+      this._checkDatabaseInitialized();
+      
+      // Get all contacts
+      const contacts = await this.getAllContacts();
+      
+      // Create the exports directory in the desktop db folder
+      const desktopPath = app.getPath('desktop');
+      const exportsDir = path.join(desktopPath, 'db', 'exports');
+      if (!fs.existsSync(exportsDir)) {
+        fs.mkdirSync(exportsDir, { recursive: true });
+      }
+      
+      // Generate a filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filePath = path.join(exportsDir, `contacts_${timestamp}.json`);
+      
+      // Write contacts to the file
+      fs.writeFileSync(filePath, JSON.stringify(contacts, null, 2), 'utf8');
+      
+      console.log(`Exported ${contacts.length} contacts to JSON file: ${filePath}`);
+      
+      return {
+        success: true,
+        filePath,
+        count: contacts.length
+      };
+    } catch (error) {
+      console.error('Error exporting contacts as JSON:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Export contacts to a CSV file
+   * @returns {Promise<Object>} - Object with success status and file path
+   */
+  async exportContactsAsCsv() {
+    try {
+      this._checkDatabaseInitialized();
+      
+      // Get all contacts
+      const contacts = await this.getAllContacts();
+      
+      // Create the exports directory in the desktop db folder
+      const desktopPath = app.getPath('desktop');
+      const exportsDir = path.join(desktopPath, 'db', 'exports');
+      if (!fs.existsSync(exportsDir)) {
+        fs.mkdirSync(exportsDir, { recursive: true });
+      }
+      
+      // Generate a filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filePath = path.join(exportsDir, `contacts_${timestamp}.csv`);
+      
+      // Convert contacts to CSV
+      const worksheet = xlsx.utils.json_to_sheet(contacts);
+      const csvContent = xlsx.utils.sheet_to_csv(worksheet);
+      
+      // Write CSV content to file
+      fs.writeFileSync(filePath, csvContent, 'utf8');
+      
+      console.log(`Exported ${contacts.length} contacts to CSV file: ${filePath}`);
+      
+      return {
+        success: true,
+        filePath,
+        count: contacts.length
+      };
+    } catch (error) {
+      console.error('Error exporting contacts as CSV:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Export contacts to an Excel file
+   * @returns {Promise<Object>} - Object with success status and file path
+   */
+  async exportContactsAsExcel() {
+    try {
+      this._checkDatabaseInitialized();
+      
+      // Get all contacts
+      const contacts = await this.getAllContacts();
+      
+      // Create the exports directory in the desktop db folder
+      const desktopPath = app.getPath('desktop');
+      const exportsDir = path.join(desktopPath, 'db', 'exports');
+      if (!fs.existsSync(exportsDir)) {
+        fs.mkdirSync(exportsDir, { recursive: true });
+      }
+      
+      // Generate a filename with timestamp
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filePath = path.join(exportsDir, `contacts_${timestamp}.xlsx`);
+      
+      // Create a workbook and add a worksheet
+      const workbook = xlsx.utils.book_new();
+      const worksheet = xlsx.utils.json_to_sheet(contacts);
+      
+      // Add the worksheet to the workbook
+      xlsx.utils.book_append_sheet(workbook, worksheet, 'Contacts');
+      
+      // Write the workbook to a file
+      xlsx.writeFile(workbook, filePath);
+      
+      console.log(`Exported ${contacts.length} contacts to Excel file: ${filePath}`);
+      
+      return {
+        success: true,
+        filePath,
+        count: contacts.length
+      };
+    } catch (error) {
+      console.error('Error exporting contacts as Excel:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete all contacts from the database
+   * @returns {Promise<Object>} - Object with success status and count of deleted contacts
+   */
+  async deleteAllContacts() {
+    try {
+      this._checkDatabaseInitialized();
+      
+      // Get the count before deletion
+      const count = await Contact.count();
+      
+      // Delete all contacts
+      await Contact.destroy({ where: {} });
+      
+      console.log(`Deleted all ${count} contacts from the database`);
+      
+      return {
+        success: true,
+        count
+      };
+    } catch (error) {
+      console.error('Error deleting all contacts:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Delete multiple contacts by ID
+   * @param {Array<number>} ids - Array of contact IDs to delete
+   * @returns {Promise<Object>} - Object with success status and count of deleted contacts
+   */
+  async deleteContacts(ids) {
+    try {
+      this._checkDatabaseInitialized();
+      
+      if (!Array.isArray(ids) || ids.length === 0) {
+        return {
+          success: false,
+          error: 'No valid contact IDs provided',
+          count: 0
+        };
+      }
+      
+      // Delete contacts with the specified IDs
+      const result = await Contact.destroy({
+        where: {
+          id: {
+            [Op.in]: ids
+          }
+        }
+      });
+      
+      console.log(`Deleted ${result} contacts with IDs: ${ids.join(', ')}`);
+      
+      return {
+        success: true,
+        count: result
+      };
+    } catch (error) {
+      console.error('Error deleting contacts by ID:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Get a contact by ID
    * @param {number} id - Contact ID
    * @returns {Promise<Object>} - Contact object
    */
   async getContactById(id) {
     try {
+      this._checkDatabaseInitialized();
+      
       const contact = await Contact.findByPk(id);
       // Return null if contact not found
       if (!contact) return null;
@@ -141,6 +364,8 @@ class ContactController {
    */
   async getContactByPhone(phoneNumber) {
     try {
+      this._checkDatabaseInitialized();
+      
       if (!phoneNumber) return null;
       
       // Format the phone number for consistency
@@ -165,6 +390,8 @@ class ContactController {
    */
   async createContact(contactData) {
     try {
+      this._checkDatabaseInitialized();
+      
       // Validate required phone number
       if (!contactData.phoneNumber) {
         return {
@@ -224,6 +451,8 @@ class ContactController {
    */
   async updateContact(id, contactData) {
     try {
+      this._checkDatabaseInitialized();
+      
       // Validate input ID
       if (!id) {
         throw new Error(`Invalid contact ID: ${id}`);
@@ -291,6 +520,8 @@ class ContactController {
    */
   async deleteContact(id) {
     try {
+      this._checkDatabaseInitialized();
+      
       // Validate input ID
       if (!id) {
         throw new Error(`Invalid contact ID: ${id}`);
@@ -329,6 +560,8 @@ class ContactController {
    */
   async importContacts(filePath, fileType, progressCallback = null) {
     try {
+      this._checkDatabaseInitialized();
+      
       let contacts = [];
       const sourceName = path.basename(filePath);
       
@@ -365,6 +598,8 @@ class ContactController {
    */
   async bulkImportContacts(contacts, sourceName, progressCallback = null) {
     try {
+      this._checkDatabaseInitialized();
+      
       console.log(`Starting bulk import of ${contacts.length} contacts from ${sourceName}`);
       
       // Prepare result counters
@@ -394,8 +629,9 @@ class ContactController {
       const existingPhoneNumbers = new Set();
       
       // Use raw query for better performance with large datasets
+      // Note: Sequelize pluralizes and lowercases table names by default, so we use the correct format
       const existingPhones = await sequelize.query(
-        'SELECT phoneNumber FROM Contacts',
+        'SELECT phoneNumber FROM "Contacts"',
         { type: sequelize.QueryTypes.SELECT }
       );
       
@@ -780,6 +1016,8 @@ class ContactController {
    */
   async bulkDeleteContacts(ids, progressCallback = null) {
     try {
+      this._checkDatabaseInitialized();
+      
       console.log(`Starting bulk delete of ${ids.length} contacts`);
       
       // Prepare result

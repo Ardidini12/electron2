@@ -40,6 +40,9 @@ async function initContacts() {
     // Set up event listeners
     setupContactsEventListeners();
     
+    // Update dashboard contacts count
+    updateDashboardContactsCount();
+    
     // Check if contacts table exists
     const contactsTable = document.getElementById('contacts-table');
     if (!contactsTable) {
@@ -65,6 +68,21 @@ async function initContacts() {
   } catch (error) {
     console.error('Error initializing contacts:', error);
     showNotification('Error', 'Failed to initialize contacts: ' + error.message, 'error');
+  }
+}
+
+/**
+ * Update the contacts count in the dashboard
+ */
+async function updateDashboardContactsCount() {
+  try {
+    const response = await api.getContactsCount();
+    const totalContactsElement = document.getElementById('total-contacts');
+    if (totalContactsElement) {
+      totalContactsElement.textContent = response.count;
+    }
+  } catch (error) {
+    console.error('Error updating dashboard contacts count:', error);
   }
 }
 
@@ -142,6 +160,99 @@ function setupContactsEventListeners() {
       updateDeleteSelectedButton();
     });
   }
+  
+  // Export buttons
+  setupExportButtons();
+}
+
+/**
+ * Set up export buttons for contacts
+ */
+function setupExportButtons() {
+  // Add export buttons to the action bar if they don't exist
+  const actionBar = document.querySelector('#contacts .action-bar');
+  if (!actionBar) return;
+  
+  // Check if export buttons already exist
+  if (!document.getElementById('export-json')) {
+    // Create export JSON button
+    const exportJsonBtn = document.createElement('button');
+    exportJsonBtn.id = 'export-json';
+    exportJsonBtn.className = 'secondary-btn';
+    exportJsonBtn.innerHTML = '<i class="fas fa-file-export"></i> Export JSON';
+    exportJsonBtn.addEventListener('click', exportContactsAsJSON);
+    actionBar.appendChild(exportJsonBtn);
+    
+    // Create export CSV button
+    const exportCsvBtn = document.createElement('button');
+    exportCsvBtn.id = 'export-csv';
+    exportCsvBtn.className = 'secondary-btn';
+    exportCsvBtn.innerHTML = '<i class="fas fa-file-csv"></i> Export CSV';
+    exportCsvBtn.addEventListener('click', exportContactsAsCSV);
+    actionBar.appendChild(exportCsvBtn);
+    
+    // Create export Excel button
+    const exportExcelBtn = document.createElement('button');
+    exportExcelBtn.id = 'export-excel';
+    exportExcelBtn.className = 'secondary-btn';
+    exportExcelBtn.innerHTML = '<i class="fas fa-file-excel"></i> Export Excel';
+    exportExcelBtn.addEventListener('click', exportContactsAsExcel);
+    actionBar.appendChild(exportExcelBtn);
+  }
+}
+
+/**
+ * Export contacts as JSON
+ */
+async function exportContactsAsJSON() {
+  try {
+    showNotification('Info', 'Preparing JSON export...', 'info');
+    const response = await api.exportContacts('json');
+    if (response.success) {
+      showNotification('Success', `Contacts exported to ${response.filePath}`, 'success');
+    } else {
+      showNotification('Error', 'Failed to export contacts', 'error');
+    }
+  } catch (error) {
+    console.error('Error exporting contacts as JSON:', error);
+    showNotification('Error', 'Failed to export contacts: ' + error.message, 'error');
+  }
+}
+
+/**
+ * Export contacts as CSV
+ */
+async function exportContactsAsCSV() {
+  try {
+    showNotification('Info', 'Preparing CSV export...', 'info');
+    const response = await api.exportContacts('csv');
+    if (response.success) {
+      showNotification('Success', `Contacts exported to ${response.filePath}`, 'success');
+    } else {
+      showNotification('Error', 'Failed to export contacts', 'error');
+    }
+  } catch (error) {
+    console.error('Error exporting contacts as CSV:', error);
+    showNotification('Error', 'Failed to export contacts: ' + error.message, 'error');
+  }
+}
+
+/**
+ * Export contacts as Excel
+ */
+async function exportContactsAsExcel() {
+  try {
+    showNotification('Info', 'Preparing Excel export...', 'info');
+    const response = await api.exportContacts('excel');
+    if (response.success) {
+      showNotification('Success', `Contacts exported to ${response.filePath}`, 'success');
+    } else {
+      showNotification('Error', 'Failed to export contacts', 'error');
+    }
+  } catch (error) {
+    console.error('Error exporting contacts as Excel:', error);
+    showNotification('Error', 'Failed to export contacts: ' + error.message, 'error');
+  }
 }
 
 /**
@@ -216,7 +327,7 @@ function displayPaginatedContacts(contactsToDisplay, pagination) {
   
   // If no contacts, show a message
   if (contactsToDisplay.length === 0) {
-    tableBody.innerHTML = '<tr><td colspan="7" class="text-center">No contacts found</td></tr>';
+    tableBody.innerHTML = '<tr><td colspan="7" class="text-center">No contacts available. Import contacts or add a new contact.</td></tr>';
     return;
   }
   
@@ -230,16 +341,16 @@ function displayPaginatedContacts(contactsToDisplay, pagination) {
     // Create each cell
     row.innerHTML = `
       <td><input type="checkbox" class="contact-checkbox" data-id="${contact.id}" ${isChecked ? 'checked' : ''}></td>
-      <td>${contact.name || ''}</td>
-      <td>${contact.surname || ''}</td>
-      <td>${contact.phoneNumber || ''}</td>
-      <td>${contact.email || ''}</td>
+      <td>${contact.name || '-'}</td>
+      <td>${contact.surname || '-'}</td>
+      <td>${contact.phoneNumber || '-'}</td>
+      <td>${contact.email || '-'}</td>
       <td>${contact.source || 'Added manually'}</td>
       <td>
-        <button class="action-btn edit-btn" data-id="${contact.id}">
+        <button class="action-btn edit-btn" data-id="${contact.id}" title="Edit Contact">
           <i class="fas fa-edit"></i>
         </button>
-        <button class="action-btn delete-btn" data-id="${contact.id}">
+        <button class="action-btn delete-btn" data-id="${contact.id}" title="Delete Contact">
           <i class="fas fa-trash"></i>
         </button>
       </td>
@@ -248,45 +359,39 @@ function displayPaginatedContacts(contactsToDisplay, pagination) {
     tableBody.appendChild(row);
   });
   
-  // Add event listeners to delete buttons
-  document.querySelectorAll('.delete-btn').forEach(button => {
-    button.addEventListener('click', async () => {
-      const id = button.getAttribute('data-id');
-      if (!id) return;
+  // Add event listeners to action buttons
+  tableBody.querySelectorAll('.edit-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const contactId = btn.getAttribute('data-id');
+      openContactModal(contactId);
+    });
+  });
+  
+  tableBody.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const contactId = btn.getAttribute('data-id');
+      deleteContact(contactId);
+    });
+  });
+  
+  // Add event listeners to checkboxes
+  tableBody.querySelectorAll('.contact-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', (e) => {
+      const contactId = checkbox.getAttribute('data-id');
       
-      if (confirm('Are you sure you want to delete this contact?')) {
-        try {
-          await api.deleteContact(id);
-          showNotification('Contact Deleted', 'Contact has been deleted successfully', 'success');
-          loadContactsPaginated(); // Reload the current page
-        } catch (error) {
-          showNotification('Error deleting contact', error.message, 'error');
-        }
-      }
-    });
-  });
-  
-  // Add event listeners to edit buttons
-  document.querySelectorAll('.edit-btn').forEach(button => {
-    button.addEventListener('click', () => {
-      const id = button.getAttribute('data-id');
-      if (id) openContactModal(id);
-    });
-  });
-  
-  // Add event listeners to contact checkboxes
-  document.querySelectorAll('.contact-checkbox').forEach(checkbox => {
-    checkbox.addEventListener('change', () => {
-      const id = checkbox.getAttribute('data-id');
-      if (checkbox.checked) {
-        selectedContactIds.add(id);
+      if (e.target.checked) {
+        selectedContactIds.add(contactId);
       } else {
-        selectedContactIds.delete(id);
-        allContactsSelected = false;
-        // Uncheck "select all" if any individual checkbox is unchecked
+        selectedContactIds.delete(contactId);
+        
+        // Uncheck "select all" checkbox if any individual checkbox is unchecked
         const selectAllCheckbox = document.getElementById('select-all-contacts');
-        if (selectAllCheckbox) selectAllCheckbox.checked = false;
+        if (selectAllCheckbox && selectAllCheckbox.checked) {
+          selectAllCheckbox.checked = false;
+          allContactsSelected = false;
       }
+      }
+      
       updateDeleteSelectedButton();
     });
   });
@@ -296,305 +401,295 @@ function displayPaginatedContacts(contactsToDisplay, pagination) {
 }
 
 /**
- * Add optimized pagination controls to the contacts table
+ * Add optimized pagination controls
  * @param {Object} pagination - Pagination information
  */
 function addOptimizedPagination(pagination) {
+  const paginationContainer = document.querySelector('#contacts .pagination-container');
+  
   // Create pagination container if it doesn't exist
-  let paginationContainer = document.querySelector('.pagination-container');
   if (!paginationContainer) {
-    paginationContainer = document.createElement('div');
-    paginationContainer.className = 'pagination-container';
-    const contactsTable = document.getElementById('contacts-table');
-    if (contactsTable && contactsTable.parentNode) {
-      contactsTable.parentNode.appendChild(paginationContainer);
+    const container = document.createElement('div');
+    container.className = 'pagination-container';
+    
+    const contactsSection = document.getElementById('contacts');
+    if (contactsSection) {
+      contactsSection.appendChild(container);
     }
   }
   
-  // Clear pagination container
-  paginationContainer.innerHTML = '';
+  // Get or create pagination container
+  const paginationElement = document.querySelector('#contacts .pagination-container');
+  if (!paginationElement) return;
+  
+  // Clear existing pagination
+  paginationElement.innerHTML = '';
+  
+  // If there's only one page, don't show pagination
+  if (pagination.totalPages <= 1) return;
+  
+  // Create pagination info
+  const paginationInfo = document.createElement('div');
+  paginationInfo.className = 'pagination-info';
+  paginationInfo.textContent = `Showing ${pagination.from}-${pagination.to} of ${pagination.total} contacts`;
   
   // Create pagination controls
-  const pagination_el = document.createElement('div');
-  pagination_el.className = 'pagination';
-  
-  // First page button
-  const firstButton = document.createElement('button');
-  firstButton.innerHTML = '<i class="fas fa-angle-double-left"></i>';
-  firstButton.disabled = pagination.currentPage === 1;
-  firstButton.addEventListener('click', () => {
-    currentPage = 1;
-    loadContactsPaginated();
-  });
-  pagination_el.appendChild(firstButton);
+  const paginationControls = document.createElement('div');
+  paginationControls.className = 'pagination-controls';
   
   // Previous button
   const prevButton = document.createElement('button');
   prevButton.innerHTML = '<i class="fas fa-chevron-left"></i>';
-  prevButton.disabled = !pagination.hasPrevious;
+  prevButton.disabled = pagination.currentPage === 1;
   prevButton.addEventListener('click', () => {
-    if (pagination.hasPrevious) {
+    if (currentPage > 1) {
       currentPage--;
       loadContactsPaginated();
     }
   });
-  pagination_el.appendChild(prevButton);
-  
-  // Page indicator
-  const pageIndicator = document.createElement('span');
-  pageIndicator.textContent = `Page ${pagination.currentPage} of ${pagination.totalPages} (${pagination.total} contacts)`;
-  pagination_el.appendChild(pageIndicator);
   
   // Next button
   const nextButton = document.createElement('button');
   nextButton.innerHTML = '<i class="fas fa-chevron-right"></i>';
-  nextButton.disabled = !pagination.hasNext;
+  nextButton.disabled = pagination.currentPage === pagination.totalPages;
   nextButton.addEventListener('click', () => {
-    if (pagination.hasNext) {
+    if (currentPage < totalPages) {
       currentPage++;
       loadContactsPaginated();
     }
   });
-  pagination_el.appendChild(nextButton);
   
-  // Last page button
-  const lastButton = document.createElement('button');
-  lastButton.innerHTML = '<i class="fas fa-angle-double-right"></i>';
-  lastButton.disabled = pagination.currentPage === pagination.totalPages;
-  lastButton.addEventListener('click', () => {
-    currentPage = pagination.totalPages;
-    loadContactsPaginated();
-  });
-  pagination_el.appendChild(lastButton);
+  // Page indicator
+  const pageIndicator = document.createElement('span');
+  pageIndicator.className = 'page-indicator';
+  pageIndicator.textContent = `Page ${pagination.currentPage} of ${pagination.totalPages}`;
   
-  // Add pagination to container
-  paginationContainer.appendChild(pagination_el);
+  // Assemble pagination controls
+  paginationControls.appendChild(prevButton);
+  paginationControls.appendChild(pageIndicator);
+  paginationControls.appendChild(nextButton);
   
-  // Add page size info
-  const pageSizeInfo = document.createElement('div');
-  pageSizeInfo.className = 'pagination-info';
-  pageSizeInfo.innerHTML = `<span>Showing ${pageSize} contacts per page</span>`;
-  paginationContainer.appendChild(pageSizeInfo);
+  // Add to pagination container
+  paginationElement.appendChild(paginationInfo);
+  paginationElement.appendChild(paginationControls);
 }
 
 /**
- * Update the "Delete Selected" button state
+ * Update the state of the delete selected button
  */
 function updateDeleteSelectedButton() {
   const deleteSelectedButton = document.getElementById('delete-selected-contacts');
-  
   if (deleteSelectedButton) {
-    const selectedCount = allContactsSelected ? totalContacts : selectedContactIds.size;
+    if (selectedContactIds.size > 0 || allContactsSelected) {
+      deleteSelectedButton.disabled = false;
     
-    if (selectedCount > 0) {
-      deleteSelectedButton.removeAttribute('disabled');
-      
-      // Change button text based on selection
+      // Update button text to show count
       if (allContactsSelected) {
         deleteSelectedButton.innerHTML = `<i class="fas fa-trash"></i> Delete All (${totalContacts})`;
-        deleteSelectedButton.classList.add('warning');
       } else {
-        deleteSelectedButton.innerHTML = `<i class="fas fa-trash"></i> Delete Selected (${selectedCount})`;
-        deleteSelectedButton.classList.remove('warning');
+        deleteSelectedButton.innerHTML = `<i class="fas fa-trash"></i> Delete Selected (${selectedContactIds.size})`;
       }
     } else {
-      deleteSelectedButton.setAttribute('disabled', 'disabled');
+      deleteSelectedButton.disabled = true;
       deleteSelectedButton.innerHTML = '<i class="fas fa-trash"></i> Delete Selected';
-      deleteSelectedButton.classList.remove('warning');
     }
   }
 }
 
 /**
- * Open contact modal for adding or editing a contact
+ * Open the contact modal for adding or editing a contact
  * @param {string|null} id - The contact ID to edit, or null for a new contact
  */
 async function openContactModal(id = null) {
-  try {
-    // Wait for API to be available
-    await waitForAPI();
-    
     const modal = document.getElementById('contact-modal');
     const modalTitle = document.getElementById('contact-modal-title');
-    const contactForm = document.getElementById('contact-form');
-    
-    if (!modal || !modalTitle || !contactForm) {
-      console.error('Contact modal elements not found');
-      return;
-    }
+    const form = document.getElementById('contact-form');
+    const saveButton = document.getElementById('save-contact');
     
     // Reset form
-    contactForm.reset();
-    
-    // Update modal title
-    modalTitle.textContent = id ? 'Edit Contact' : 'Add Contact';
-    
-    // Set contact ID if editing
-    const contactIdField = document.getElementById('contact-id');
-    if (contactIdField) {
-      contactIdField.value = id || '';
-    }
-    
-    // If editing, populate form with contact data
+    form.reset();
+  
+    // Set modal title and contact ID
     if (id) {
-      console.log(`Fetching contact data for ID: ${id}`);
-      const contact = await api.getContact(id);
-      console.log('Contact data received:', contact);
-      
-      if (contact) {
-        // Populate form fields
-        const fields = [
-          { id: 'contact-name', value: contact.name || '' },
-          { id: 'contact-surname', value: contact.surname || '' },
-          { id: 'contact-phone', value: contact.phoneNumber || '' },
-          { id: 'contact-email', value: contact.email || '' },
-          { id: 'contact-birthday', value: contact.birthday || '' },
-          { id: 'contact-source', value: contact.source || 'Added manually' },
-          { id: 'contact-notes', value: contact.notes || '' }
-        ];
-        
-        console.log('Setting form fields:', fields);
-        
-        fields.forEach(field => {
-          const element = document.getElementById(field.id);
-          if (element) {
-            console.log(`Setting ${field.id} to "${field.value}"`);
-            element.value = field.value;
+        modalTitle.textContent = 'Edit Contact';
+        document.getElementById('contact-id').value = id;
+    
+        try {
+            // Get contact details
+            const response = await api.getContact(id);
+            let contact;
             
-            // Ensure the field is editable
-            element.disabled = false;
-            element.readOnly = field.id === 'contact-source' ? true : false; // Only source should be readonly
-          } else {
-            console.error(`Element not found: ${field.id}`);
-          }
-        });
-      } else {
-        showNotification('Error', 'Contact not found', 'error');
-        return;
-      }
+            // Handle different response formats
+            if (response && response.success === true && response.contact) {
+                // Format: { success: true, contact: {...} }
+                contact = response.contact;
+            } else if (response && response.id) {
+                // Format: direct contact object
+                contact = response;
+            } else {
+                // Invalid response format
+                console.error('Invalid contact response format:', response);
+                showNotification('Error', 'Failed to load contact details: Invalid response format', 'error');
+                return;
+            }
+            
+            // Fill form with contact details
+            document.getElementById('contact-name').value = contact.name || '';
+            document.getElementById('contact-surname').value = contact.surname || '';
+            document.getElementById('contact-phone').value = contact.phoneNumber || '';
+            document.getElementById('contact-email').value = contact.email || '';
+            document.getElementById('contact-birthday').value = contact.birthday || '';
+            document.getElementById('contact-source').value = contact.source || 'Added manually';
+            document.getElementById('contact-notes').value = contact.notes || '';
+        } catch (error) {
+            console.error('Error loading contact details:', error);
+            showNotification('Error', 'Failed to load contact details: ' + error.message, 'error');
+        }
     } else {
-      // Set default values for new contact
-      const sourceField = document.getElementById('contact-source');
-      if (sourceField) {
-        sourceField.value = 'Added manually';
-      }
-      
-      // Ensure all fields are editable
-      const formFields = contactForm.querySelectorAll('input, textarea, select');
-      formFields.forEach(field => {
-        field.disabled = false;
-        field.readOnly = false;
-      });
+        modalTitle.textContent = 'Add Contact';
+        document.getElementById('contact-id').value = '';
+        document.getElementById('contact-source').value = 'Added manually';
+    }
+  
+    // Clear any previous error messages
+    const phoneError = document.getElementById('phone-error');
+    if (phoneError) {
+        phoneError.style.display = 'none';
+        phoneError.textContent = '';
     }
     
     // Show modal
     modal.style.display = 'block';
     
-    // Add event listeners to close buttons
+    // Set up event listeners for the modal
+    setupContactModalEventListeners();
+}
+
+/**
+ * Set up event listeners for the contact modal
+ */
+function setupContactModalEventListeners() {
+  const modal = document.getElementById('contact-modal');
     const closeButtons = modal.querySelectorAll('.close-modal');
-    closeButtons.forEach(button => {
-      // Remove existing event listeners
-      const newCloseButton = button.cloneNode(true);
-      button.parentNode.replaceChild(newCloseButton, button);
-      
-      newCloseButton.addEventListener('click', () => {
+  const saveButton = document.getElementById('save-contact');
+  const form = document.getElementById('contact-form');
+  
+  // Close modal when clicking close button or outside the modal
+  closeButtons.forEach(button => {
+    button.onclick = () => {
         modal.style.display = 'none';
-      });
-    });
-    
-    // Set up save button
-    const saveButton = document.getElementById('save-contact');
-    if (saveButton) {
-      // Remove existing event listeners
-      const newSaveButton = saveButton.cloneNode(true);
-      saveButton.parentNode.replaceChild(newSaveButton, saveButton);
-      
-      // Add new event listener
-      newSaveButton.addEventListener('click', saveContact);
-    }
-    
-    // Outside click to close
-    window.onclick = function(event) {
+    };
+  });
+  
+  // Close modal when clicking outside the modal content
+  window.onclick = (event) => {
       if (event.target === modal) {
         modal.style.display = 'none';
       }
     };
-  } catch (error) {
-    console.error('Error opening contact modal:', error);
-    showNotification('Error', 'Failed to open contact form: ' + error.message, 'error');
-  }
+  
+  // Save contact when clicking save button
+  saveButton.onclick = saveContact;
+  
+  // Prevent form submission (we handle it with the save button)
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    saveContact();
+  };
+  
+  // Focus on first input field
+  setTimeout(() => {
+    const firstInput = form.querySelector('input:not([type="hidden"])');
+    if (firstInput) firstInput.focus();
+  }, 100);
 }
 
 /**
- * Save contact from form
+ * Save contact (create or update)
  */
 async function saveContact() {
   try {
-    // Wait for API to be available
-    await waitForAPI();
+    const contactId = document.getElementById('contact-id').value;
+    const phoneInput = document.getElementById('contact-phone');
+    const phoneError = document.getElementById('phone-error');
     
-    // Get form data
-    const id = document.getElementById('contact-id')?.value;
-    const name = document.getElementById('contact-name')?.value || '';
-    const surname = document.getElementById('contact-surname')?.value || '';
-    const phoneNumber = document.getElementById('contact-phone')?.value || '';
-    const email = document.getElementById('contact-email')?.value || '';
-    const birthday = document.getElementById('contact-birthday')?.value || '';
-    const source = document.getElementById('contact-source')?.value || 'Added manually';
-    const notes = document.getElementById('contact-notes')?.value || '';
+    const contactData = {
+      name: document.getElementById('contact-name').value.trim(),
+      surname: document.getElementById('contact-surname').value.trim(),
+      phoneNumber: phoneInput.value.trim(),
+      email: document.getElementById('contact-email').value.trim(),
+      birthday: document.getElementById('contact-birthday').value,
+      source: document.getElementById('contact-source').value,
+      notes: document.getElementById('contact-notes').value.trim()
+    };
     
-    // Validate required fields
-    if (!phoneNumber) {
-      showNotification('Validation Error', 'Phone number is required', 'error');
+    // Validate phone number (required)
+    if (!contactData.phoneNumber) {
+      phoneError.textContent = 'Phone number is required';
+      phoneError.style.display = 'block';
+      phoneInput.focus();
       return;
     }
     
     // Format phone number
-    const formattedPhone = formatPhoneNumber(phoneNumber);
+    contactData.phoneNumber = formatPhoneNumber(contactData.phoneNumber);
     
-    // Create contact data object
-    const contactData = {
-      name,
-      surname,
-      phoneNumber: formattedPhone,
-      email: email || null, // Use null for empty email
-      birthday: birthday || null,
-      source: source || 'Added manually',
-      notes: notes || null
-    };
-    
-    console.log('Saving contact data:', contactData);
-    
-    // Save contact
-    if (id) {
-      // Update existing contact
-      const result = await api.updateContact(id, contactData);
-      if (result) {
-        showNotification('Contact Updated', 'Contact has been updated successfully', 'success');
-      } else {
-        throw new Error('Failed to update contact');
+    // Check for duplicate phone number
+    try {
+      const response = await api.checkDuplicatePhone(contactData.phoneNumber, contactId);
+      if (response && response.isDuplicate) {
+        phoneError.textContent = 'A contact with this phone number already exists';
+        phoneError.style.display = 'block';
+        phoneInput.focus();
+        return;
       }
+    } catch (error) {
+      console.error('Error checking duplicate phone:', error);
+    }
+    
+    // Create or update contact
+    let response;
+    let success = false;
+    
+    if (contactId) {
+      // Update existing contact
+      response = await api.updateContact(contactId, contactData);
+      success = !!response; // If response exists, it was successful
     } else {
       // Create new contact
-      const result = await api.createContact(contactData);
-      if (result && result.success) {
-        showNotification('Contact Added', 'New contact has been created successfully', 'success');
-      } else if (result && result.code === 'DUPLICATE_PHONE') {
-        showNotification('Duplicate Phone', 'A contact with this phone number already exists', 'error');
-        return;
+      response = await api.createContact(contactData);
+      success = response && (response.success !== false); // Check success field or assume true if exists
+    }
+    
+    // Check if the response was successful
+    if (success) {
+      // Close modal
+      document.getElementById('contact-modal').style.display = 'none';
+      
+      // Show success notification
+      showNotification(
+        'Success', 
+        contactId ? 'Contact updated successfully' : 'Contact created successfully',
+        'success'
+      );
+      
+      // Reload contacts
+      await loadContactsPaginated();
+      
+      // Update dashboard contacts count
+      updateDashboardContactsCount();
+    } else {
+      // Show error message
+      const errorMessage = response && response.error ? response.error : 'Failed to save contact';
+      
+      if (response && response.code === 'DUPLICATE_PHONE') {
+        phoneError.textContent = 'A contact with this phone number already exists';
+        phoneError.style.display = 'block';
+        phoneInput.focus();
       } else {
-        throw new Error(result?.error || 'Failed to create contact');
+        showNotification('Error', errorMessage, 'error');
       }
     }
-    
-    // Close modal
-    const modal = document.getElementById('contact-modal');
-    if (modal) {
-      modal.style.display = 'none';
-    }
-    
-    // Reload contacts
-    loadContactsPaginated();
   } catch (error) {
     console.error('Error saving contact:', error);
     showNotification('Error', 'Failed to save contact: ' + error.message, 'error');
@@ -602,20 +697,108 @@ async function saveContact() {
 }
 
 /**
- * Rebuild the contacts table if it's missing
+ * Delete a contact
+ * @param {string} id - The contact ID to delete
+ */
+async function deleteContact(id) {
+  try {
+    // Confirm deletion
+    if (!confirm('Are you sure you want to delete this contact?')) {
+        return;
+    }
+    
+    const response = await api.deleteContact(id);
+    
+    if (response.success) {
+      showNotification('Success', 'Contact deleted successfully', 'success');
+      
+      // Remove from selected contacts if it was selected
+      selectedContactIds.delete(id);
+      
+      // Reload contacts
+      await loadContactsPaginated();
+      
+      // Update dashboard contacts count
+      updateDashboardContactsCount();
+      } else {
+      showNotification('Error', response.message || 'Failed to delete contact', 'error');
+    }
+  } catch (error) {
+    console.error('Error deleting contact:', error);
+    showNotification('Error', 'Failed to delete contact: ' + error.message, 'error');
+  }
+}
+
+/**
+ * Delete selected contacts
+ */
+async function deleteSelectedContacts() {
+  try {
+    // If no contacts selected, do nothing
+    if (selectedContactIds.size === 0 && !allContactsSelected) {
+        return;
+    }
+    
+    // Confirm deletion
+    let confirmMessage = 'Are you sure you want to delete ';
+    if (allContactsSelected) {
+      confirmMessage += `all ${totalContacts} contacts?`;
+      } else {
+      confirmMessage += `${selectedContactIds.size} selected contact${selectedContactIds.size !== 1 ? 's' : ''}?`;
+    }
+    
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+    
+    // Show notification
+    showNotification('Info', 'Deleting contacts...', 'info');
+    
+    // Delete contacts
+    let response;
+    if (allContactsSelected) {
+      response = await api.deleteAllContacts();
+    } else {
+      response = await api.deleteContacts(Array.from(selectedContactIds));
+    }
+    
+    if (response.success) {
+      showNotification('Success', 'Contacts deleted successfully', 'success');
+      
+      // Clear selected contacts
+      selectedContactIds.clear();
+      allContactsSelected = false;
+    
+    // Reload contacts
+      await loadContactsPaginated();
+      
+      // Update dashboard contacts count
+      updateDashboardContactsCount();
+    } else {
+      showNotification('Error', response.message || 'Failed to delete contacts', 'error');
+    }
+  } catch (error) {
+    console.error('Error deleting contacts:', error);
+    showNotification('Error', 'Failed to delete contacts: ' + error.message, 'error');
+  }
+}
+
+/**
+ * Rebuild the contacts table if it doesn't exist
  */
 function rebuildContactsTable() {
   console.log('Rebuilding contacts table...');
   
   const contactsSection = document.getElementById('contacts');
   if (!contactsSection) {
-    console.error('Contacts section not found in the DOM');
+    console.error('Contacts section not found');
     return;
   }
   
-  // Check if the table container exists
+  // Check if table container exists
   let tableContainer = contactsSection.querySelector('.contacts-table-container');
   if (!tableContainer) {
+    // Create table container
     tableContainer = document.createElement('div');
     tableContainer.className = 'contacts-table-container';
     contactsSection.appendChild(tableContainer);
@@ -627,8 +810,8 @@ function rebuildContactsTable() {
   table.id = 'contacts-table';
   
   // Create table header
-  const thead = document.createElement('thead');
-  thead.innerHTML = `
+  table.innerHTML = `
+    <thead>
     <tr>
       <th><input type="checkbox" id="select-all-contacts"></th>
       <th>Name</th>
@@ -638,1418 +821,1118 @@ function rebuildContactsTable() {
       <th>Source</th>
       <th>Actions</th>
     </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td colspan="7" class="text-center">Loading contacts...</td>
+      </tr>
+    </tbody>
   `;
-  table.appendChild(thead);
-  
-  // Create table body
-  const tbody = document.createElement('tbody');
-  tbody.innerHTML = '<tr><td colspan="7" class="text-center">Loading contacts...</td></tr>';
-  table.appendChild(tbody);
   
   // Add table to container
   tableContainer.innerHTML = '';
   tableContainer.appendChild(table);
+  
+  // Create pagination container
+  const paginationContainer = document.createElement('div');
+  paginationContainer.className = 'pagination-container';
+  contactsSection.appendChild(paginationContainer);
+  
+  // Set up event listeners
+  setupContactsEventListeners();
   
   // Load contacts
   loadContactsPaginated();
 }
 
 /**
- * Open import modal for importing contacts
+ * Open the import contacts modal
  */
-function openImportModal() {
+async function openImportModal() {
+  try {
+    // Show the import modal
   const modal = document.getElementById('import-modal');
   if (!modal) {
-    console.error('Import modal not found');
+      console.error('Import modal not found in the DOM');
+      // Create the import modal if it doesn't exist
+      createImportModal();
     return;
   }
   
-  // Reset form
+    // Reset the import form
   const importForm = document.getElementById('import-form');
   if (importForm) {
     importForm.reset();
   }
   
-  // Reset file path display
-  const filePathDisplay = document.getElementById('import-file-path');
-  if (filePathDisplay) {
-    filePathDisplay.value = '';
-  }
-  
-  // Create hidden input for file path if it doesn't exist
-  let filePathInput = document.getElementById('file-path');
-  if (!filePathInput) {
-    filePathInput = document.createElement('input');
-    filePathInput.type = 'hidden';
-    filePathInput.id = 'file-path';
-    importForm.appendChild(filePathInput);
-  }
-  
-  // Show modal
+    // Clear any previous error messages
+    const errorContainer = document.getElementById('import-error');
+    if (errorContainer) {
+      errorContainer.style.display = 'none';
+      errorContainer.textContent = '';
+    }
+    
+    // Clear any previous file info
+    const fileInfo = document.getElementById('selected-file-info');
+    if (fileInfo) {
+      fileInfo.textContent = '';
+      fileInfo.style.display = 'none';
+    }
+    
+    // Show the modal
   modal.style.display = 'block';
   
-  // Add event listeners
+    // Set up event listeners for the modal
+    setupImportModalEventListeners();
+  } catch (error) {
+    console.error('Error opening import modal:', error);
+    showNotification('Error', 'Failed to open import modal: ' + error.message, 'error');
+  }
+}
+
+/**
+ * Create the import modal if it doesn't exist
+ */
+function createImportModal() {
+  // Create the modal
+  const modal = document.createElement('div');
+  modal.id = 'import-modal';
+  modal.className = 'modal';
+  
+  modal.innerHTML = `
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Import Contacts</h2>
+        <span class="close-modal">&times;</span>
+      </div>
+      <div class="modal-body">
+        <p>Select a file to import contacts. Supported file types: CSV, Excel, JSON.</p>
+        
+        <form id="import-form">
+          <div class="form-group">
+            <label for="import-file-path">File:</label>
+            <div class="file-input-container">
+              <input type="text" id="import-file-path" readonly placeholder="No file selected">
+              <button type="button" id="browse-file" class="secondary-btn">Browse</button>
+            </div>
+          </div>
+          
+          <div id="selected-file-info" class="file-info" style="display: none;"></div>
+          
+          <div id="import-error" class="error-message" style="display: none;"></div>
+        </form>
+        
+        <div class="import-progress" style="display: none;">
+          <div class="progress-container">
+            <div id="import-progress-bar" class="progress-bar"></div>
+          </div>
+          <div id="import-progress-text" class="progress-text">Processing...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="secondary-btn close-modal">Cancel</button>
+        <button type="button" id="start-import" class="primary-btn"><i class="fas fa-file-import"></i> Next: Preview Contacts</button>
+      </div>
+    </div>
+  `;
+  
+  // Add to document
+  document.body.appendChild(modal);
+  
+  // Show the modal
+  modal.style.display = 'block';
+  
+  // Set up event listeners
+  setupImportModalEventListeners();
+}
+
+/**
+ * Set up event listeners for the import modal
+ */
+function setupImportModalEventListeners() {
+  const modal = document.getElementById('import-modal');
+  if (!modal) return;
+  
   const closeButtons = modal.querySelectorAll('.close-modal');
+  const importForm = document.getElementById('import-form');
+  const fileInput = document.getElementById('import-file-path');
+  const browseButton = document.getElementById('browse-file');
+  const importButton = document.getElementById('start-import');
+  
+  // Close modal when clicking close button
   closeButtons.forEach(button => {
-    // Remove existing event listeners to prevent duplicates
-    const newCloseButton = button.cloneNode(true);
-    button.parentNode.replaceChild(newCloseButton, button);
-    
-    newCloseButton.addEventListener('click', () => {
+    button.onclick = () => {
       modal.style.display = 'none';
-    });
+    };
   });
   
-  // Browse button
-  const browseButton = document.getElementById('browse-file');
-  if (browseButton) {
-    // Remove existing event listeners
-    const newBrowseButton = browseButton.cloneNode(true);
-    browseButton.parentNode.replaceChild(newBrowseButton, browseButton);
-    
-    // Add new event listener
-    newBrowseButton.addEventListener('click', browseFile);
-  }
-  
-  // Import button
-  const importButton = document.getElementById('start-import');
-  if (importButton) {
-    // Remove existing event listeners
-    const newImportButton = importButton.cloneNode(true);
-    importButton.parentNode.replaceChild(newImportButton, importButton);
-    
-    // Add new event listener
-    newImportButton.addEventListener('click', importContacts);
-  }
-  
-  // Outside click to close
-  window.onclick = function(event) {
+  // Close modal when clicking outside the modal content
+  window.onclick = (event) => {
     if (event.target === modal) {
       modal.style.display = 'none';
     }
   };
-}
-
-/**
- * Browse for a file to import
- */
-async function browseFile() {
-  try {
-    // Wait for API to be available
-    await waitForAPI();
-    
+  
+  // Handle browse button click
+  if (browseButton) {
+    browseButton.onclick = async () => {
+      try {
     const result = await api.showFileDialog({
-      title: 'Select File to Import',
-      buttonLabel: 'Import',
+          title: 'Select Contacts File',
       filters: [
-        { name: 'CSV Files', extensions: ['csv'] },
-        { name: 'Excel Files', extensions: ['xlsx', 'xls'] },
-        { name: 'JSON Files', extensions: ['json'] },
+            { name: 'Contact Files', extensions: ['csv', 'xlsx', 'xls', 'json'] },
         { name: 'All Files', extensions: ['*'] }
       ],
       properties: ['openFile']
     });
     
-    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
-      console.log('File selection canceled');
-      return;
-    }
-    
+        if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
     const filePath = result.filePaths[0];
-    console.log('Selected file:', filePath);
-    
-    // Display selected file path
-    const filePathDisplay = document.getElementById('import-file-path');
-    if (filePathDisplay) {
-      filePathDisplay.value = filePath;
-    }
-    
-    // Store file path in hidden input
-    const filePathInput = document.getElementById('file-path');
-    if (filePathInput) {
-      filePathInput.value = filePath;
-    }
-  } catch (error) {
-    console.error('Error browsing for file:', error);
-    showNotification('Error', 'Failed to browse for file: ' + error.message, 'error');
-  }
-}
-
-/**
- * Import contacts from the selected file
- */
-async function importContacts() {
-  try {
-    // Wait for API to be available
-    await waitForAPI();
-    
-    // Get file path
-    const filePathInput = document.getElementById('file-path');
-    if (!filePathInput || !filePathInput.value) {
-      showNotification('No File Selected', 'Please select a file to import', 'warning');
-      return;
-    }
-    
-    const filePath = filePathInput.value;
-    const fileExt = filePath.split('.').pop().toLowerCase();
-    
-    // Validate file extension
-    if (!['csv', 'xlsx', 'xls', 'json'].includes(fileExt)) {
-      showNotification('Invalid File', 'Please select a CSV, Excel, or JSON file', 'error');
-      return;
-    }
-    
-    // Show progress container
-    const progressContainer = document.getElementById('import-progress-container');
-    if (progressContainer) {
-      progressContainer.style.display = 'block';
-    }
-    
-    // Reset preview stats
-    const statsElements = [
-      'preview-total-count', 
-      'preview-valid-count',
-      'preview-duplicates-count', 
-      'preview-missing-count',
-      'preview-issues-count',
-      'selected-for-import-count'
-    ];
-    
-    statsElements.forEach(id => {
-      const element = document.getElementById(id);
-      if (element) element.textContent = '0';
-    });
-    
-    // Reset preview tables
-    const previewTables = ['preview-valid-tbody', 'preview-skipped-tbody'];
-    previewTables.forEach(id => {
-      const element = document.getElementById(id);
-      if (element) element.innerHTML = '<tr><td colspan="9" class="text-center">Loading...</td></tr>';
-    });
-    
-    // Reset pagination containers
-    const paginationContainers = ['valid-contacts-pagination', 'skipped-contacts-pagination'];
-    paginationContainers.forEach(id => {
-      const element = document.getElementById(id);
-      if (element) element.innerHTML = '';
-    });
-    
-    // Parse file and show preview
-    try {
-      // Parse contacts from file
-      const result = await api.parseContactsFile(filePath, fileExt);
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to parse file');
-      }
-      
-      console.log(`Parsed ${result.contacts.length} contacts from file`);
-      
-      // Show import preview
-      await showImportPreview(result.contacts, filePath, fileExt);
-      
-    } catch (error) {
-      console.error('Error parsing contacts file:', error);
-      showNotification('Error', 'Failed to parse contacts file: ' + error.message, 'error');
-      
-      // Hide progress container
-      if (progressContainer) {
-        progressContainer.style.display = 'none';
-      }
+          
+          // Make sure fileInput exists before trying to set its value
+          if (fileInput) {
+            fileInput.value = filePath;
+            
+            // Show file info
+            const fileInfo = document.getElementById('selected-file-info');
+            if (fileInfo) {
+              const fileName = getBaseName(filePath);
+              fileInfo.textContent = `Selected file: ${fileName}`;
+              fileInfo.style.display = 'block';
+            }
+          } else {
+            console.error('File input element not found (import-file-path)');
+            showNotification('Error', 'File input element not found in the form', 'error');
+          }
     }
   } catch (error) {
-    console.error('Error importing contacts:', error);
-    showNotification('Error', 'Failed to import contacts: ' + error.message, 'error');
+        console.error('Error selecting file:', error);
+        showNotification('Error', 'Failed to select file: ' + error.message, 'error');
+      }
+    };
   }
-}
-
-/**
- * Delete selected contacts
- */
-async function deleteSelectedContacts() {
-  try {
-    // Wait for API to be available
-    await waitForAPI();
-    
-    // Get selected contact IDs
-    let contactIds = [];
-    
-    if (allContactsSelected) {
-      // If all contacts are selected, we need a different approach
-      if (confirm(`Are you sure you want to delete ALL ${totalContacts} contacts? This cannot be undone.`)) {
-        // For full dataset deletion, we need to get all contact IDs
-        // We'll do this in batches to avoid memory issues
-        
-        // First ask the user if they're really sure
-        if (!confirm(`FINAL WARNING: This will permanently delete ALL ${totalContacts} contacts from your database. This action CANNOT be undone.`)) {
+  
+  // Handle import button click
+  if (importButton) {
+    importButton.onclick = async () => {
+      try {
+        // Check if fileInput exists before accessing its value
+        if (!fileInput) {
+          console.error('File input element not found (import-file-path)');
+          showNotification('Error', 'File input element not found in the form', 'error');
           return;
         }
         
-        // Show loading notification
-        showNotification('Deleting Contacts', 'Preparing to delete all contacts...', 'info');
-        
-        // Get all contacts (this might take time but it's a necessary step)
-        const allContacts = await api.getContacts();
-        contactIds = allContacts.map(contact => contact.id);
-      } else {
-        return;
-      }
-    } else {
-      // Get selected contact IDs from the Set
-      contactIds = Array.from(selectedContactIds);
-      
-      // Confirm deletion
-      if (!confirm(`Are you sure you want to delete ${contactIds.length} selected contacts?`)) {
-        return;
-      }
-    }
-    
-    if (contactIds.length === 0) {
-      showNotification('No Contacts Selected', 'Please select contacts to delete', 'warning');
+        const filePath = fileInput.value ? fileInput.value.trim() : '';
+        if (!filePath) {
+          const errorContainer = document.getElementById('import-error');
+          if (errorContainer) {
+            errorContainer.textContent = 'Please select a file to import';
+            errorContainer.style.display = 'block';
+          }
       return;
     }
     
-    // Show delete in progress notification
-    showNotification('Deleting Contacts', `Deleting ${contactIds.length} contacts...`, 'info');
-    
-    // Create a progress dialog
-    const progressDialog = document.createElement('div');
-    progressDialog.className = 'progress-dialog';
-    progressDialog.innerHTML = `
-      <div class="progress-content">
-        <h3>Deleting Contacts</h3>
-        <p>Deleting <span id="delete-count">${contactIds.length}</span> contacts...</p>
-        <div class="progress-bar-container">
-          <div id="delete-progress-bar" class="progress-bar" style="width: 0%"></div>
-        </div>
-        <p id="delete-status">0% complete</p>
-      </div>
-    `;
-    document.body.appendChild(progressDialog);
-    
-    // Set up progress handler
-    const updateProgress = (progress) => {
-      const percent = Math.round((progress.deleted + progress.errors) / progress.total * 100);
-      const progressBar = document.getElementById('delete-progress-bar');
-      const statusText = document.getElementById('delete-status');
-      
-      if (progressBar) progressBar.style.width = `${percent}%`;
-      if (statusText) statusText.textContent = `${percent}% complete (${progress.deleted} deleted, ${progress.errors} errors)`;
-    };
-    
-    // Listen for progress updates
-    const progressListener = (event, progress) => {
-      updateProgress(progress);
-    };
-    
-    if (window.api && window.api.on) {
-      window.api.on('delete-progress', progressListener);
+        // Get file extension
+        const fileExtension = filePath.split('.').pop().toLowerCase();
+        let fileType;
+        
+        switch (fileExtension) {
+          case 'csv':
+            fileType = 'csv';
+            break;
+          case 'xlsx':
+          case 'xls':
+            fileType = 'xlsx';
+            break;
+          case 'json':
+            fileType = 'json';
+            break;
+          default:
+            const errorContainer = document.getElementById('import-error');
+            if (errorContainer) {
+              errorContainer.textContent = 'Unsupported file type. Please select a CSV, Excel, or JSON file.';
+              errorContainer.style.display = 'block';
+            }
+      return;
     }
     
+        // Show loading state
+        importButton.disabled = true;
+        importButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Parsing...';
+        
+        // Parse the file first to show preview
     try {
-      // Use the optimized bulk delete method
-      const result = await api.deleteContactsBulk(contactIds);
-      
-      // Remove progress dialog
-      document.body.removeChild(progressDialog);
-      
-      // Remove progress listener
-      if (window.api && window.api.removeAllListeners) {
-        window.api.removeAllListeners('delete-progress');
-      }
-      
-      // Show success notification
-      showNotification(
-        'Contacts Deleted',
-        `Successfully deleted ${result.deleted} contacts. ${result.errors > 0 ? `${result.errors} contacts could not be deleted.` : ''}`,
-        result.errors > 0 ? 'warning' : 'success'
-      );
-      
-      // Reset selection
-      selectedContactIds.clear();
-      allContactsSelected = false;
-      
-      // Reset select all checkbox
-      const selectAllCheckbox = document.getElementById('select-all-contacts');
-      if (selectAllCheckbox) {
-        selectAllCheckbox.checked = false;
-      }
-      
-      // Reload contacts to get updated count
-      loadContactsPaginated();
+      // Parse contacts from file
+          const response = await api.parseContactsFile(filePath, fileType);
+          
+          if (response && response.success) {
+            // Hide the import modal
+            modal.style.display = 'none';
+            
+            // Process contacts for preview
+            const contacts = await prepareContactsForPreview(response.contacts, getBaseName(filePath));
+            
+            // Show preview modal
+            showImportPreview(contacts);
+          } else {
+            // Show error message
+            const errorContainer = document.getElementById('import-error');
+            if (errorContainer) {
+              errorContainer.textContent = (response && response.error) ? response.error : 'Failed to parse contacts file';
+              errorContainer.style.display = 'block';
+            }
+          }
     } catch (error) {
-      // Remove progress dialog in case of error
-      document.body.removeChild(progressDialog);
-      
-      // Remove progress listener
-      if (window.api && window.api.removeAllListeners) {
-        window.api.removeAllListeners('delete-progress');
-      }
-      
-      console.error('Error deleting selected contacts:', error);
-      showNotification('Error', 'Failed to delete contacts: ' + error.message, 'error');
-    }
+      console.error('Error parsing contacts file:', error);
+          const errorContainer = document.getElementById('import-error');
+          if (errorContainer) {
+            errorContainer.textContent = 'Failed to parse contacts file: ' + error.message;
+            errorContainer.style.display = 'block';
+          }
+        }
+        
+        // Reset button state
+        importButton.disabled = false;
+        importButton.innerHTML = '<i class="fas fa-file-import"></i> Next: Preview Contacts';
   } catch (error) {
-    console.error('Error deleting selected contacts:', error);
-    showNotification('Error', 'Failed to delete contacts: ' + error.message, 'error');
+    console.error('Error importing contacts:', error);
+        
+        // Reset button state
+        if (importButton) {
+          importButton.disabled = false;
+          importButton.innerHTML = '<i class="fas fa-file-import"></i> Next: Preview Contacts';
+        }
+        
+        // Show error message
+        const errorContainer = document.getElementById('import-error');
+        if (errorContainer) {
+          errorContainer.textContent = 'Failed to import contacts: ' + error.message;
+          errorContainer.style.display = 'block';
+        }
+      }
+    };
+  }
+  
+  // Set up progress event listener
+  api.on('import-progress', (progress) => {
+    updateImportProgress(progress);
+  });
+}
+
+/**
+ * Update the import progress bar and status
+ * @param {Object} progress - Progress information
+ */
+function updateImportProgress(progress) {
+  const progressBar = document.getElementById('import-progress-bar');
+  const progressText = document.getElementById('import-progress-text');
+  
+  if (progressBar && progressText) {
+    // Calculate percentage
+    const percent = Math.round((progress.current / progress.total) * 100);
+    
+    // Update progress bar
+    progressBar.style.width = `${percent}%`;
+    
+    // Update progress text
+    progressText.textContent = `Processing ${progress.current} of ${progress.total} contacts (${percent}%)`;
   }
 }
 
 /**
- * Show import preview for contacts
- * @param {Array} contacts - Array of contacts to preview
- * @param {string} filePath - Path to the import file
- * @param {string} fileExt - File extension
+ * Prepare contacts for preview by validating them
+ * @param {Array} contacts - Raw contacts from file
+ * @param {string} source - Source name
+ * @returns {Array} - Contacts with validation info
  */
-async function showImportPreview(contacts, filePath, fileExt) {
-  try {
-    console.log(`Showing import preview for ${contacts.length} contacts from ${filePath}`);
-    
-    // Hide the import modal
-    const importModal = document.getElementById('import-modal');
-    if (importModal) {
-      importModal.style.display = 'none';
+async function prepareContactsForPreview(contacts, source) {
+  // First, check for duplicates within the file
+  const phoneMap = new Map();
+  const duplicatePhones = new Set();
+  
+  // First pass: identify duplicates within the file
+  contacts.forEach(contact => {
+    if (contact.phoneNumber && contact.phoneNumber.trim() !== '') {
+      const formattedPhone = formatPhoneNumber(contact.phoneNumber);
+      if (phoneMap.has(formattedPhone)) {
+        duplicatePhones.add(formattedPhone);
+      } else {
+        phoneMap.set(formattedPhone, contact);
+      }
+    }
+  });
+  
+  // Second pass: check against database and mark duplicates
+  const processedContacts = await Promise.all(contacts.map(async contact => {
+    // Format phone if present
+    if (contact.phoneNumber && contact.phoneNumber.trim() !== '') {
+      contact.phoneNumber = formatPhoneNumber(contact.phoneNumber);
     }
     
-    // Show the preview modal
-    const previewModal = document.getElementById('import-preview-modal');
-    if (!previewModal) {
-      console.error('Preview modal not found');
-      return;
+    // Set validation status
+    let valid = true;
+    let error = null;
+    let isDuplicate = false;
+    
+    // Check if phone is missing
+    if (!contact.phoneNumber || contact.phoneNumber.trim() === '') {
+      valid = false;
+      error = 'Missing phone number';
+    } else {
+      // Check if it's a duplicate within the file
+      if (duplicatePhones.has(contact.phoneNumber)) {
+        isDuplicate = true;
+        error = 'Duplicate phone number in file';
+      }
+      
+      // Check if it exists in database
+      try {
+        const response = await api.checkDuplicatePhone(contact.phoneNumber);
+        if (response && response.isDuplicate) {
+          isDuplicate = true;
+          error = 'Phone number already in database';
+    }
+  } catch (error) {
+        console.error('Error checking duplicate phone:', error);
+      }
     }
     
-    // Reset and show the modal
-    previewModal.style.display = 'block';
+    // Add source
+    contact.source = source || 'Imported';
     
-    // Process contacts for preview
-    const validContacts = [];
-    const skippedContacts = [];
-    let duplicatesCount = 0;
-    let missingPhoneCount = 0;
-    let otherIssuesCount = 0;
-    
-    // Get existing phone numbers for duplicate checking
-    const existingContacts = await api.getContacts();
-    const existingPhones = new Set(existingContacts.map(c => c.phoneNumber));
-    
-    // First pass: identify duplicates within the file itself
-    const filePhoneMap = new Map(); // Map to track phone numbers within the file
-    const duplicateIndices = new Set(); // Set to track indices of duplicate contacts
-    
-    // Identify duplicates within the file
-    contacts.forEach((contact, index) => {
-      if (contact.phoneNumber) {
-        const formattedPhone = formatPhoneNumber(contact.phoneNumber);
-        if (filePhoneMap.has(formattedPhone)) {
-          // This is a duplicate within the file
-          duplicateIndices.add(index);
-          duplicateIndices.add(filePhoneMap.get(formattedPhone));
-        } else {
-          filePhoneMap.set(formattedPhone, index);
-        }
-      }
-    });
-    
-    // Second pass: process each contact
-    contacts.forEach((contact, index) => {
-      // Clone the contact to avoid modifying the original
-      const processedContact = { ...contact, _index: index };
-      
-      // Check for required fields
-      if (!processedContact.phoneNumber) {
-        processedContact._skipReason = 'Missing phone number';
-        processedContact._status = 'error';
-        skippedContacts.push(processedContact);
-        missingPhoneCount++;
-        return;
-      }
-      
-      // Format phone number
-      processedContact.phoneNumber = formatPhoneNumber(processedContact.phoneNumber);
-      
-      // Check for duplicates with existing contacts
-      if (existingPhones.has(processedContact.phoneNumber)) {
-        processedContact._skipReason = 'Duplicate with existing contact';
-        processedContact._status = 'duplicate-existing';
-        skippedContacts.push(processedContact);
-        duplicatesCount++;
-        return;
-      }
-      
-      // Check for duplicates within the file
-      if (duplicateIndices.has(index)) {
-        // Mark as duplicate but still keep in valid contacts (user can choose which to keep)
-        processedContact._isDuplicate = true;
-        processedContact._status = 'duplicate-file';
-        processedContact._selected = true; // Selected by default
-        validContacts.push(processedContact);
-        return;
-      }
-      
-      // Add to valid contacts
-      processedContact._status = 'valid';
-      processedContact._selected = true; // Selected by default
-      validContacts.push(processedContact);
-      
-      // Add to existing phones to prevent further duplicates
-      existingPhones.add(processedContact.phoneNumber);
-    });
-    
-    // Update stats
-    document.getElementById('preview-total-count').textContent = contacts.length;
-    document.getElementById('preview-valid-count').textContent = validContacts.length;
-    document.getElementById('preview-duplicates-count').textContent = duplicatesCount + duplicateIndices.size / 2;
-    document.getElementById('preview-missing-count').textContent = missingPhoneCount;
-    document.getElementById('preview-issues-count').textContent = otherIssuesCount;
-    document.getElementById('selected-for-import-count').textContent = validContacts.filter(c => c._selected).length;
-    
-    // Define pagination variables for valid contacts
-    const validContactsState = {
-      pageSize: 100,
-      currentPage: 1,
-      totalPages: Math.ceil(validContacts.length / 100)
+    // Add validation info
+    return {
+      ...contact,
+      valid,
+      error,
+      isDuplicate,
+      skip: false // Flag to mark contacts to skip during import
     };
-    
-    // Define pagination variables for skipped contacts
-    const skippedContactsState = {
-      pageSize: 100,
-      currentPage: 1,
-      totalPages: Math.ceil(skippedContacts.length / 100)
-    };
-    
-    // Function to render contacts table with pagination
-    const renderValidContactsTable = (page = 1) => {
-      const validTableBody = document.getElementById('preview-valid-tbody');
-      if (!validTableBody) return;
-      
-      validTableBody.innerHTML = '';
-      validContactsState.currentPage = page;
-      
-      if (validContacts.length === 0) {
-        validTableBody.innerHTML = '<tr><td colspan="9" class="text-center">No valid contacts found</td></tr>';
-        return;
-      }
-      
-      // Calculate start and end indices for the current page
-      const startIndex = (page - 1) * validContactsState.pageSize;
-      const endIndex = Math.min(startIndex + validContactsState.pageSize, validContacts.length);
-      
-      // Update select all checkbox state
-      const selectAllCheckbox = document.getElementById('select-all-preview-contacts');
-      if (selectAllCheckbox) {
-        // Check if all visible contacts on this page are selected
-        const allVisibleSelected = validContacts
-          .slice(startIndex, endIndex)
-          .every(contact => contact._selected);
+  }));
+  
+  return processedContacts;
+}
+
+/**
+ * Show import preview with pagination
+ * @param {Array} contacts - Contacts to preview
+ */
+function showImportPreview(contacts) {
+  // Get the source name from the first contact
+  const source = contacts.length > 0 ? contacts[0].source : 'Imported';
+  
+  // Set up pagination variables
+  const PREVIEW_PAGE_SIZE = 100; // Show 100 contacts per page
+  let previewPage = 1;
+  let previewTotalPages = Math.ceil(contacts.length / PREVIEW_PAGE_SIZE);
+  
+  // Count valid and invalid contacts
+  const validCount = contacts.filter(c => c.valid && !c.skip).length;
+  const invalidCount = contacts.filter(c => !c.valid && !c.skip).length;
+  const skippedCount = contacts.filter(c => c.skip).length;
+  
+  // Get the preview modal or create it if it doesn't exist
+  let modal = document.getElementById('import-preview-modal');
+  
+  if (!modal) {
+    // Create the modal
+    modal = document.createElement('div');
+    modal.id = 'import-preview-modal';
+    modal.className = 'modal';
+    document.body.appendChild(modal);
+  }
+  
+  // Create modal content
+  modal.innerHTML = `
+    <div class="modal-content import-preview-modal-content">
+      <div class="modal-header">
+        <h2>Import Preview (${contacts.length.toLocaleString()} contacts)</h2>
+        <span class="close-modal">&times;</span>
+      </div>
+      <div class="modal-body">
+        <p>Review your contacts before importing. ${invalidCount > 0 ? '<strong class="error-text">Issues found!</strong>' : ''}</p>
         
-        selectAllCheckbox.checked = allVisibleSelected;
-      }
-      
-      // Render contacts for the current page
-      for (let i = startIndex; i < endIndex; i++) {
-        const contact = validContacts[i];
+        <div class="import-stats-summary">
+          <div class="stat-card">
+            <div class="stat-value">${contacts.length.toLocaleString()}</div>
+            <div class="stat-label">Total Contacts</div>
+          </div>
+          <div class="stat-card ${validCount > 0 ? 'valid' : ''}">
+            <div class="stat-value">${validCount.toLocaleString()}</div>
+            <div class="stat-label">Valid</div>
+          </div>
+          <div class="stat-card ${invalidCount > 0 ? 'invalid' : ''}">
+            <div class="stat-value">${invalidCount.toLocaleString()}</div>
+            <div class="stat-label">With Issues</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="selected-for-import-count">${validCount.toLocaleString()}</div>
+            <div class="stat-label">Selected for Import</div>
+          </div>
+        </div>
+        
+        <div class="preview-actions" style="margin-bottom: 15px; display: flex; gap: 10px;">
+          <button id="import-all-valid-btn" class="primary-btn" ${validCount === 0 ? 'disabled' : ''}>
+            Import All Valid (${validCount.toLocaleString()})
+          </button>
+          <button id="skip-all-invalid-btn" class="secondary-btn" ${invalidCount === 0 ? 'disabled' : ''}>
+            Skip All Invalid (${invalidCount.toLocaleString()})
+          </button>
+          <button id="back-to-import" class="secondary-btn">
+            Back to Import
+          </button>
+        </div>
+        
+        <div class="tab-container">
+          <div class="tab-header">
+            <button class="preview-tab-link active" data-tab="valid-contacts-tab">Valid Contacts</button>
+            <button class="preview-tab-link" data-tab="skipped-contacts-tab">Issues & Skipped</button>
+          </div>
+          
+          <div class="tab-content">
+            <div id="valid-contacts-tab" class="tab-pane active">
+              <div class="preview-table-container" style="max-height: 500px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th><input type="checkbox" id="select-all-preview" checked></th>
+                      <th>Name</th>
+                      <th>Surname</th>
+                      <th>Phone Number</th>
+                      <th>Email</th>
+                      <th>Birthday</th>
+                      <th>Source</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="preview-valid-tbody">
+                    <tr><td colspan="9" class="text-center">Loading preview...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div id="valid-contacts-pagination" class="pagination-container"></div>
+              <div class="bulk-actions">
+                <button id="deselect-all-preview" class="secondary-btn">Deselect All</button>
+                <button id="skip-selected-preview" class="secondary-btn">Skip Selected</button>
+              </div>
+            </div>
+            
+            <div id="skipped-contacts-tab" class="tab-pane">
+              <div class="preview-table-container" style="max-height: 500px; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th><input type="checkbox" id="select-all-skipped"></th>
+                      <th>Name</th>
+                      <th>Surname</th>
+                      <th>Phone Number</th>
+                      <th>Email</th>
+                      <th>Birthday</th>
+                      <th>Source</th>
+                      <th>Issue</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="preview-skipped-tbody">
+                    <tr><td colspan="9" class="text-center">Loading skipped contacts...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="bulk-actions">
+                <button id="move-to-valid" class="secondary-btn">Move Selected to Valid</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div id="large-dataset-warning" class="warning-message" style="display: none;">
+          <i class="fas fa-exclamation-triangle"></i>
+          <span id="large-dataset-message"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div class="import-stats">
+          ${contacts.length.toLocaleString()} contacts found: ${validCount.toLocaleString()} valid, ${invalidCount.toLocaleString()} with issues, ${skippedCount.toLocaleString()} skipped
+        </div>
+        <div class="import-actions">
+          <button id="complete-import" class="primary-btn" ${validCount === 0 ? 'disabled' : ''}>
+            Import ${validCount.toLocaleString()} Contacts
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Show the modal
+  modal.style.display = 'block';
+  
+  // Function to update the preview table with current page - using document fragment for performance
+  function updatePreviewTable() {
+    const tableBody = document.getElementById('preview-valid-tbody');
+    if (!tableBody) return;
+    
+    // Clear existing rows
+    tableBody.innerHTML = '';
+    
+    // Calculate page slice
+    const startIdx = (previewPage - 1) * PREVIEW_PAGE_SIZE;
+    const endIdx = Math.min(startIdx + PREVIEW_PAGE_SIZE, contacts.length);
+    
+    // Use DocumentFragment for better performance
+    const fragment = document.createDocumentFragment();
+    
+    // Filter valid contacts that aren't skipped for the current page
+    const validContactsForPage = contacts
+      .filter(c => c.valid && !c.skip)
+      .slice(startIdx, endIdx);
+    
+    if (validContactsForPage.length === 0) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.innerHTML = '<td colspan="9" class="text-center">No valid contacts to display</td>';
+      fragment.appendChild(emptyRow);
+    } else {
+      // Add rows for current page
+      validContactsForPage.forEach((contact, index) => {
+        const actualIndex = contacts.findIndex(c => c === contact);
         const row = document.createElement('tr');
+        row.dataset.index = actualIndex;
         
-        // Add a class if this is a duplicate
-        if (contact._isDuplicate) {
-          row.classList.add('duplicate-row');
+        // Add classes based on contact status
+        if (contact.isDuplicate) {
+          row.classList.add('duplicate-contact');
+        } else if (!contact.phoneNumber || contact.phoneNumber.trim() === '') {
+          row.classList.add('missing-phone');
         }
         
         row.innerHTML = `
-          <td><input type="checkbox" class="preview-contact-checkbox" data-index="${contact._index}" ${contact._selected ? 'checked' : ''}></td>
-          <td>${contact.name || ''}</td>
-          <td>${contact.surname || ''}</td>
-          <td class="${contact._isDuplicate ? 'duplicate-cell' : ''}">${contact.phoneNumber || ''}</td>
-          <td>${contact.email || ''}</td>
-          <td>${contact.birthday || ''}</td>
-          <td>${contact.source || 'Imported'}</td>
+          <td><input type="checkbox" class="contact-preview-checkbox" data-index="${actualIndex}" checked></td>
+          <td>${contact.name || '-'}</td>
+          <td>${contact.surname || '-'}</td>
+          <td>${contact.phoneNumber || '-'}</td>
+          <td>${contact.email || '-'}</td>
+          <td>${contact.birthday || '-'}</td>
+          <td>${contact.source || '-'}</td>
           <td>
-            <span class="status-badge ${contact._isDuplicate ? 'warning' : 'valid'}">
-              ${contact._isDuplicate ? 'Duplicate' : 'Valid'}
-            </span>
+            ${contact.isDuplicate ? 
+              '<span class="status-warning">Duplicate Phone</span>' : 
+              !contact.phoneNumber || contact.phoneNumber.trim() === '' ?
+              '<span class="status-error">Missing Phone</span>' :
+              '<span class="status-valid">Valid</span>'}
           </td>
           <td>
-            <button class="action-btn skip-btn" data-index="${contact._index}" title="Skip this contact">
+            <button class="action-btn edit-preview-btn" data-index="${actualIndex}" title="Edit Contact">
+              <i class="fas fa-edit"></i>
+            </button>
+            <button class="action-btn skip-preview-btn" data-index="${actualIndex}" title="Skip Contact">
               <i class="fas fa-ban"></i>
             </button>
           </td>
         `;
         
-        validTableBody.appendChild(row);
-      }
-      
-      // Add pagination controls
-      renderValidPagination();
-      
-      // Reattach event listeners for the new checkboxes
-      document.querySelectorAll('.preview-contact-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', () => {
-          const index = parseInt(checkbox.getAttribute('data-index'));
-          const contact = validContacts.find(c => c._index === index);
-          if (contact) {
-            contact._selected = checkbox.checked;
-            updateSelectedCount(validContacts);
-          }
-        });
+        fragment.appendChild(row);
       });
-      
-      // Reattach event listeners for skip buttons
-      document.querySelectorAll('.skip-btn').forEach(button => {
-        button.addEventListener('click', () => {
-          const index = parseInt(button.getAttribute('data-index'));
-          const contactIndex = validContacts.findIndex(c => c._index === index);
-          if (contactIndex !== -1) {
-            const contact = validContacts[contactIndex];
-            contact._selected = false;
-            contact._skipReason = 'Manually skipped';
-            contact._status = 'skipped';
-            
-            // Move from valid to skipped
-            skippedContacts.push(contact);
-            validContacts.splice(contactIndex, 1);
-            
-            // Update stats
-            document.getElementById('preview-valid-count').textContent = validContacts.length;
-            document.getElementById('preview-issues-count').textContent = ++otherIssuesCount;
-            updateSelectedCount(validContacts);
-            
-            // Update pagination state
-            validContactsState.totalPages = Math.ceil(validContacts.length / validContactsState.pageSize);
-            skippedContactsState.totalPages = Math.ceil(skippedContacts.length / skippedContactsState.pageSize);
-            
-            // Re-render tables
-            renderValidContactsTable(Math.min(validContactsState.currentPage, validContactsState.totalPages || 1));
-            renderSkippedContactsTable(1);
-          }
-        });
-      });
-      
-      // Setup select all checkbox for current page
-      if (selectAllCheckbox) {
-        selectAllCheckbox.removeEventListener('change', handleSelectAllCurrentPage);
-        selectAllCheckbox.addEventListener('change', handleSelectAllCurrentPage);
-      }
-    };
+    }
     
-    // Handler for select all checkbox
-    const handleSelectAllCurrentPage = (event) => {
-      const isChecked = event.target.checked;
-      const startIndex = (validContactsState.currentPage - 1) * validContactsState.pageSize;
-      const endIndex = Math.min(startIndex + validContactsState.pageSize, validContacts.length);
-      
-      // Update all contacts on the current page
-      for (let i = startIndex; i < endIndex; i++) {
-        validContacts[i]._selected = isChecked;
-      }
-      
-      // Update checkboxes on current page
-      document.querySelectorAll('.preview-contact-checkbox').forEach(checkbox => {
-        checkbox.checked = isChecked;
-      });
-      
-      updateSelectedCount(validContacts);
-    };
+    // Append all at once (much faster)
+    tableBody.appendChild(fragment);
     
-    // Function to render skipped contacts table with pagination
-    const renderSkippedContactsTable = (page = 1) => {
+    // Update the skipped contacts tab
+    updateSkippedContactsTable();
+    
+    // Update pagination
+    updatePreviewPagination();
+  }
+  
+  // Function to update the skipped contacts table
+  function updateSkippedContactsTable() {
+    // Get the table body for skipped contacts
       const skippedTableBody = document.getElementById('preview-skipped-tbody');
       if (!skippedTableBody) return;
       
+    // Clear existing rows
       skippedTableBody.innerHTML = '';
-      skippedContactsState.currentPage = page;
-      
-      if (skippedContacts.length === 0) {
-        skippedTableBody.innerHTML = '<tr><td colspan="9" class="text-center">No skipped contacts</td></tr>';
-        return;
-      }
-      
-      // Calculate start and end indices for the current page
-      const startIndex = (page - 1) * skippedContactsState.pageSize;
-      const endIndex = Math.min(startIndex + skippedContactsState.pageSize, skippedContacts.length);
-      
-      // Update select all checkbox state
-      const selectAllSkippedCheckbox = document.getElementById('select-all-skipped-contacts');
-      if (selectAllSkippedCheckbox) {
-        // Check if all visible contacts on this page are selected
-        const allVisibleSelected = skippedContacts
-          .slice(startIndex, endIndex)
-          .every(contact => contact._selected);
-        
-        selectAllSkippedCheckbox.checked = allVisibleSelected;
-        
-        // Add event listener for the select all checkbox
-        selectAllSkippedCheckbox.removeEventListener('change', handleSelectAllSkippedCurrentPage);
-        selectAllSkippedCheckbox.addEventListener('change', handleSelectAllSkippedCurrentPage);
-      }
-      
-      // Render contacts for the current page
-      for (let i = startIndex; i < endIndex; i++) {
-        const contact = skippedContacts[i];
+    
+    // Create document fragment for better performance
+    const fragment = document.createDocumentFragment();
+    
+    // Get all invalid or skipped contacts
+    const skippedContacts = contacts.filter(c => !c.valid || c.skip);
+    
+    if (skippedContacts.length === 0) {
+      const emptyRow = document.createElement('tr');
+      emptyRow.innerHTML = '<td colspan="9" class="text-center">No skipped contacts</td>';
+      fragment.appendChild(emptyRow);
+    } else {
+      // Add rows for all skipped contacts (no pagination for skipped tab)
+      skippedContacts.forEach((contact, index) => {
+        const originalIndex = contacts.findIndex(c => c === contact);
         const row = document.createElement('tr');
-        
-        // Initialize _selected property if not set
-        if (contact._selected === undefined) {
-          contact._selected = false;
-        }
-        
-        // Add row class based on status
-        if (contact._status === 'duplicate-existing') {
-          row.classList.add('duplicate-row');
-        } else if (contact._status === 'error') {
-          row.classList.add('error-row');
-        }
+        row.dataset.index = originalIndex;
         
         row.innerHTML = `
-          <td><input type="checkbox" class="skipped-contact-checkbox" data-index="${contact._index}" ${contact._selected ? 'checked' : ''}></td>
-          <td>${contact.name || ''}</td>
-          <td>${contact.surname || ''}</td>
-          <td>${contact.phoneNumber || ''}</td>
-          <td>${contact.email || ''}</td>
-          <td>${contact.birthday || ''}</td>
-          <td>${contact.source || 'Imported'}</td>
-          <td>${contact._skipReason || 'Unknown issue'}</td>
+          <td><input type="checkbox" class="skipped-preview-checkbox" data-index="${originalIndex}"></td>
+          <td>${contact.name || '-'}</td>
+          <td>${contact.surname || '-'}</td>
+          <td>${contact.phoneNumber || '-'}</td>
+          <td>${contact.email || '-'}</td>
+          <td>${contact.birthday || '-'}</td>
+          <td>${contact.source || '-'}</td>
+          <td><span class="status-error">${contact.error || 'Skipped'}</span></td>
           <td>
-            <button class="action-btn restore-btn" data-index="${contact._index}" title="Move to valid contacts">
-              <i class="fas fa-arrow-left"></i>
+            <button class="action-btn edit-preview-btn" data-index="${originalIndex}" title="Edit Contact">
+              <i class="fas fa-edit"></i>
+            </button>
+            <button class="action-btn restore-preview-btn" data-index="${originalIndex}" title="Move to Valid">
+              <i class="fas fa-undo"></i>
             </button>
           </td>
         `;
         
-        skippedTableBody.appendChild(row);
-      }
-      
-      // Add pagination controls
-      renderSkippedPagination();
-      
-      // Add event listeners to checkboxes
-      document.querySelectorAll('.skipped-contact-checkbox').forEach(checkbox => {
-        checkbox.addEventListener('change', () => {
-          const index = parseInt(checkbox.getAttribute('data-index'));
-          const contact = skippedContacts.find(c => c._index === index);
-          if (contact) {
-            contact._selected = checkbox.checked;
-            
-            // Update select all checkbox state
-            if (selectAllSkippedCheckbox) {
-              const allChecked = Array.from(document.querySelectorAll('.skipped-contact-checkbox')).every(cb => cb.checked);
-              selectAllSkippedCheckbox.checked = allChecked;
-            }
-          }
-        });
+        fragment.appendChild(row);
       });
-      
-      // Add event listeners for restore buttons
-      document.querySelectorAll('.restore-btn').forEach(button => {
-        button.addEventListener('click', () => {
-          const index = parseInt(button.getAttribute('data-index'));
-          const contactIndex = skippedContacts.findIndex(c => c._index === index);
-          
-          if (contactIndex !== -1) {
-            const contact = skippedContacts[contactIndex];
-            
-            // Move from skipped to valid
-            contact._status = 'valid';
-            contact._selected = true; // Select by default when restored
-            validContacts.push(contact);
-            skippedContacts.splice(contactIndex, 1);
-            
-            // Update stats
-            document.getElementById('preview-valid-count').textContent = validContacts.length;
-            if (contact._skipReason === 'Missing phone number') {
-              missingPhoneCount--;
-            } else if (contact._status === 'duplicate-existing') {
-              duplicatesCount--;
-            } else {
-              otherIssuesCount--;
-            }
-            document.getElementById('preview-duplicates-count').textContent = duplicatesCount;
-            document.getElementById('preview-missing-count').textContent = missingPhoneCount;
-            document.getElementById('preview-issues-count').textContent = otherIssuesCount;
-            
-            updateSelectedCount(validContacts);
-            
-            // Update pagination state
-            validContactsState.totalPages = Math.ceil(validContacts.length / validContactsState.pageSize);
-            skippedContactsState.totalPages = Math.ceil(skippedContacts.length / skippedContactsState.pageSize);
-            
-            // Re-render tables
-            renderValidContactsTable(validContactsState.currentPage);
-            renderSkippedContactsTable(Math.min(skippedContactsState.currentPage, skippedContactsState.totalPages || 1));
-          }
-        });
-      });
-    };
+    }
     
-    // Handler for select all checkbox for skipped contacts
-    const handleSelectAllSkippedCurrentPage = (event) => {
-      const isChecked = event.target.checked;
-      const startIndex = (skippedContactsState.currentPage - 1) * skippedContactsState.pageSize;
-      const endIndex = Math.min(startIndex + skippedContactsState.pageSize, skippedContacts.length);
-      
-      // Update all skipped contacts on the current page
-      for (let i = startIndex; i < endIndex; i++) {
-        skippedContacts[i]._selected = isChecked;
-      }
-      
-      // Update checkboxes on current page
-      document.querySelectorAll('.skipped-contact-checkbox').forEach(checkbox => {
-        checkbox.checked = isChecked;
-      });
-    };
+    // Append all at once
+    skippedTableBody.appendChild(fragment);
+  }
+  
+  // Function to update pagination controls
+  function updatePreviewPagination() {
+    const validPagination = document.getElementById('valid-contacts-pagination');
+    if (!validPagination) return;
     
-    // Function to render pagination for valid contacts
-    const renderValidPagination = () => {
-      const paginationContainer = document.getElementById('valid-contacts-pagination');
-      if (!paginationContainer) return;
-      
-      paginationContainer.innerHTML = '';
-      
-      // Always show pagination info, even for single page
-      const pagination = document.createElement('div');
-      pagination.className = 'pagination preview-pagination';
-      
-      // First page button
-      const firstButton = document.createElement('button');
-      firstButton.innerHTML = '<i class="fas fa-angle-double-left"></i>';
-      firstButton.disabled = validContactsState.currentPage === 1;
-      firstButton.addEventListener('click', () => renderValidContactsTable(1));
-      pagination.appendChild(firstButton);
+    // Clear existing pagination
+    validPagination.innerHTML = '';
+    
+    // Calculate total pages for valid contacts
+    const validContacts = contacts.filter(c => c.valid && !c.skip);
+    const totalPages = Math.ceil(validContacts.length / PREVIEW_PAGE_SIZE);
+    
+    // If only one page, don't show pagination
+    if (totalPages <= 1) return;
+    
+    // Create pagination info
+    const paginationInfo = document.createElement('div');
+    paginationInfo.className = 'pagination-info';
+    
+    // Calculate displayed range
+    const startItem = (previewPage - 1) * PREVIEW_PAGE_SIZE + 1;
+    const endItem = Math.min(previewPage * PREVIEW_PAGE_SIZE, validContacts.length);
+    
+    paginationInfo.textContent = `Showing ${startItem}-${endItem} of ${validContacts.length} valid contacts`;
+    
+    // Create pagination controls
+    const paginationControls = document.createElement('div');
+    paginationControls.className = 'pagination-controls';
       
       // Previous button
       const prevButton = document.createElement('button');
       prevButton.innerHTML = '<i class="fas fa-chevron-left"></i>';
-      prevButton.disabled = validContactsState.currentPage === 1;
-      prevButton.addEventListener('click', () => 
-        renderValidContactsTable(validContactsState.currentPage - 1)
-      );
-      pagination.appendChild(prevButton);
-      
-      // Page indicator
-      const pageIndicator = document.createElement('span');
-      pageIndicator.textContent = `Page ${validContactsState.currentPage} of ${validContactsState.totalPages} (${validContacts.length} contacts)`;
-      pagination.appendChild(pageIndicator);
+    prevButton.disabled = previewPage === 1;
+    prevButton.addEventListener('click', () => {
+      if (previewPage > 1) {
+        previewPage--;
+        updatePreviewTable();
+      }
+    });
       
       // Next button
       const nextButton = document.createElement('button');
       nextButton.innerHTML = '<i class="fas fa-chevron-right"></i>';
-      nextButton.disabled = validContactsState.currentPage >= validContactsState.totalPages;
-      nextButton.addEventListener('click', () => 
-        renderValidContactsTable(validContactsState.currentPage + 1)
-      );
-      pagination.appendChild(nextButton);
-      
-      // Last page button
-      const lastButton = document.createElement('button');
-      lastButton.innerHTML = '<i class="fas fa-angle-double-right"></i>';
-      lastButton.disabled = validContactsState.currentPage >= validContactsState.totalPages;
-      lastButton.addEventListener('click', () => 
-        renderValidContactsTable(validContactsState.totalPages)
-      );
-      pagination.appendChild(lastButton);
-      
-      // Add page size info
-      const pageSizeInfo = document.createElement('div');
-      pageSizeInfo.className = 'pagination-info';
-      pageSizeInfo.innerHTML = `<span>Showing ${validContactsState.pageSize} contacts per page</span>`;
-      
-      paginationContainer.appendChild(pagination);
-      paginationContainer.appendChild(pageSizeInfo);
-    };
-    
-    // Function to render pagination for skipped contacts
-    const renderSkippedPagination = () => {
-      const paginationContainer = document.getElementById('skipped-contacts-pagination');
-      if (!paginationContainer) return;
-      
-      paginationContainer.innerHTML = '';
-      
-      // Always show pagination info, even for single page
-      const pagination = document.createElement('div');
-      pagination.className = 'pagination preview-pagination';
-      
-      // First page button
-      const firstButton = document.createElement('button');
-      firstButton.innerHTML = '<i class="fas fa-angle-double-left"></i>';
-      firstButton.disabled = skippedContactsState.currentPage === 1;
-      firstButton.addEventListener('click', () => renderSkippedContactsTable(1));
-      pagination.appendChild(firstButton);
-      
-      // Previous button
-      const prevButton = document.createElement('button');
-      prevButton.innerHTML = '<i class="fas fa-chevron-left"></i>';
-      prevButton.disabled = skippedContactsState.currentPage === 1;
-      prevButton.addEventListener('click', () => 
-        renderSkippedContactsTable(skippedContactsState.currentPage - 1)
-      );
-      pagination.appendChild(prevButton);
+    nextButton.disabled = previewPage === totalPages;
+    nextButton.addEventListener('click', () => {
+      if (previewPage < totalPages) {
+        previewPage++;
+        updatePreviewTable();
+      }
+    });
       
       // Page indicator
       const pageIndicator = document.createElement('span');
-      pageIndicator.textContent = `Page ${skippedContactsState.currentPage} of ${skippedContactsState.totalPages} (${skippedContacts.length} contacts)`;
-      pagination.appendChild(pageIndicator);
-      
-      // Next button
-      const nextButton = document.createElement('button');
-      nextButton.innerHTML = '<i class="fas fa-chevron-right"></i>';
-      nextButton.disabled = skippedContactsState.currentPage >= skippedContactsState.totalPages;
-      nextButton.addEventListener('click', () => 
-        renderSkippedContactsTable(skippedContactsState.currentPage + 1)
-      );
-      pagination.appendChild(nextButton);
-      
-      // Last page button
-      const lastButton = document.createElement('button');
-      lastButton.innerHTML = '<i class="fas fa-angle-double-right"></i>';
-      lastButton.disabled = skippedContactsState.currentPage >= skippedContactsState.totalPages;
-      lastButton.addEventListener('click', () => 
-        renderSkippedContactsTable(skippedContactsState.totalPages)
-      );
-      pagination.appendChild(lastButton);
-      
-      // Add page size info
-      const pageSizeInfo = document.createElement('div');
-      pageSizeInfo.className = 'pagination-info';
-      pageSizeInfo.innerHTML = `<span>Showing ${skippedContactsState.pageSize} contacts per page</span>`;
-      
-      paginationContainer.appendChild(pagination);
-      paginationContainer.appendChild(pageSizeInfo);
-    };
+    pageIndicator.className = 'page-indicator';
+    pageIndicator.textContent = `Page ${previewPage} of ${totalPages}`;
     
-    // Initial render of both tables
-    renderValidContactsTable(1);
-    renderSkippedContactsTable(1);
+    // Assemble pagination controls
+    paginationControls.appendChild(prevButton);
+    paginationControls.appendChild(pageIndicator);
+    paginationControls.appendChild(nextButton);
     
-    // Set up event listeners for the preview modal including special buttons
-    setupPreviewEventListeners(validContacts, skippedContacts, filePath, fileExt, renderValidContactsTable, renderSkippedContactsTable, validContactsState, skippedContactsState);
-    
-  } catch (error) {
-    console.error('Error showing import preview:', error);
-    showNotification('Error', 'Failed to show import preview: ' + error.message, 'error');
-  }
-}
-
-/**
- * Set up event listeners for the import preview modal
- * @param {Array} validContacts - Array of valid contacts
- * @param {Array} skippedContacts - Array of skipped contacts
- * @param {string} filePath - Path to the import file
- * @param {string} fileExt - File extension
- * @param {Function} renderValidContactsTable - Function to render valid contacts table
- * @param {Function} renderSkippedContactsTable - Function to render skipped contacts table
- * @param {Object} validContactsState - Pagination state for valid contacts
- * @param {Object} skippedContactsState - Pagination state for skipped contacts
- */
-function setupPreviewEventListeners(validContacts, skippedContacts, filePath, fileExt, renderValidContactsTable, renderSkippedContactsTable, validContactsState, skippedContactsState) {
-  const previewModal = document.getElementById('import-preview-modal');
-  
-  // Tab switching
-  const validTabBtn = document.getElementById('valid-tab-btn');
-  const skippedTabBtn = document.getElementById('skipped-tab-btn');
-  const validTab = document.getElementById('valid-contacts-tab');
-  const skippedTab = document.getElementById('skipped-contacts-tab');
-  
-  if (validTabBtn && skippedTabBtn && validTab && skippedTab) {
-    // Remove existing event listeners
-    const newValidTabBtn = validTabBtn.cloneNode(true);
-    const newSkippedTabBtn = skippedTabBtn.cloneNode(true);
-    
-    validTabBtn.parentNode.replaceChild(newValidTabBtn, validTabBtn);
-    skippedTabBtn.parentNode.replaceChild(newSkippedTabBtn, skippedTabBtn);
-    
-    // Add new event listeners
-    newValidTabBtn.addEventListener('click', () => {
-      newValidTabBtn.classList.add('active');
-      newSkippedTabBtn.classList.remove('active');
-      validTab.classList.add('active');
-      skippedTab.classList.remove('active');
-    });
-    
-    newSkippedTabBtn.addEventListener('click', () => {
-      newValidTabBtn.classList.remove('active');
-      newSkippedTabBtn.classList.add('active');
-      validTab.classList.remove('active');
-      skippedTab.classList.add('active');
-    });
+    // Add to pagination container
+    validPagination.appendChild(paginationInfo);
+    validPagination.appendChild(paginationControls);
   }
   
-  // Select/deselect all buttons
-  const selectAllBtn = document.getElementById('select-all-preview');
-  const deselectAllBtn = document.getElementById('deselect-all-preview');
+  // Function to update the selected count
+  function updateSelectedCount() {
+    const selectedCount = document.querySelectorAll('.contact-preview-checkbox:checked').length;
+    document.getElementById('selected-for-import-count').textContent = selectedCount.toLocaleString();
+    
+    // Update import button state and text
+    const importButton = document.getElementById('complete-import');
+    if (importButton) {
+      importButton.disabled = selectedCount === 0;
+      importButton.textContent = `Import ${selectedCount.toLocaleString()} Contacts`;
+    }
+    
+    // Update stats in footer
+    const validCount = contacts.filter(c => c.valid && !c.skip).length;
+    const invalidCount = contacts.filter(c => !c.valid && !c.skip).length;
+    const skippedCount = contacts.filter(c => c.skip).length;
+    
+    const statsDiv = document.querySelector('.import-stats');
+    if (statsDiv) {
+      statsDiv.textContent = `${contacts.length.toLocaleString()} contacts found: ${validCount.toLocaleString()} valid, ${invalidCount.toLocaleString()} with issues, ${skippedCount.toLocaleString()} skipped`;
+    }
+  }
   
-  if (selectAllBtn && deselectAllBtn) {
-    // Remove existing event listeners
-    const newSelectAllBtn = selectAllBtn.cloneNode(true);
-    const newDeselectAllBtn = deselectAllBtn.cloneNode(true);
+  // Function to edit a preview contact
+  function editPreviewContact(index) {
+    const contact = contacts[index];
+    if (!contact) return;
     
-    selectAllBtn.parentNode.replaceChild(newSelectAllBtn, selectAllBtn);
-    deselectAllBtn.parentNode.replaceChild(newDeselectAllBtn, deselectAllBtn);
+    // Create modal for editing
+    const editModal = document.createElement('div');
+    editModal.className = 'modal';
+    editModal.id = 'edit-preview-modal';
+    editModal.style.display = 'block';
+    editModal.style.zIndex = '1100';
     
-    // Add new event listeners
-    newSelectAllBtn.addEventListener('click', () => {
-      // Select all contacts across all pages
-      validContacts.forEach(contact => {
-        contact._selected = true;
-      });
+    editModal.innerHTML = `
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>Edit Contact</h2>
+          <span class="close-modal">&times;</span>
+        </div>
+        <div class="modal-body">
+          <form id="edit-preview-form">
+            <input type="hidden" id="edit-preview-index" value="${index}">
+            <div class="form-group">
+              <label for="edit-preview-name">Name:</label>
+              <input type="text" id="edit-preview-name" value="${contact.name || ''}">
+            </div>
+            <div class="form-group">
+              <label for="edit-preview-surname">Surname:</label>
+              <input type="text" id="edit-preview-surname" value="${contact.surname || ''}">
+            </div>
+            <div class="form-group">
+              <label for="edit-preview-phone">Phone Number: <span class="required">*</span></label>
+              <input type="text" id="edit-preview-phone" value="${contact.phoneNumber || ''}" required>
+              <small>International format with country code, e.g., +1234567890</small>
+              <div id="edit-preview-phone-error" class="error-message" style="display: none;"></div>
+            </div>
+            <div class="form-group">
+              <label for="edit-preview-email">Email:</label>
+              <input type="email" id="edit-preview-email" value="${contact.email || ''}">
+            </div>
+            <div class="form-group">
+              <label for="edit-preview-birthday">Birthday:</label>
+              <input type="date" id="edit-preview-birthday" value="${contact.birthday || ''}">
+            </div>
+            <div class="form-group">
+              <label for="edit-preview-source">Source:</label>
+              <input type="text" id="edit-preview-source" value="${contact.source || ''}" readonly>
+            </div>
+          </form>
+        </div>
+        <div class="modal-footer">
+          <button id="save-preview-contact" class="primary-btn">Save</button>
+          <button class="secondary-btn close-modal">Cancel</button>
+        </div>
+      </div>
+    `;
+    
+    // Add to document
+    document.body.appendChild(editModal);
+    
+    // Set up event listeners
+    editModal.querySelector('.close-modal').addEventListener('click', () => {
+      editModal.remove();
+    });
+    
+    // Save button
+    editModal.querySelector('#save-preview-contact').addEventListener('click', async () => {
+      const phoneInput = document.getElementById('edit-preview-phone');
+      const phoneError = document.getElementById('edit-preview-phone-error');
       
-      // Update checkboxes on current page
-      document.querySelectorAll('.preview-contact-checkbox').forEach(checkbox => {
-        checkbox.checked = true;
-      });
-      
-      // Update select all checkbox
-      const selectAllCheckbox = document.getElementById('select-all-preview-contacts');
-      if (selectAllCheckbox) {
-        selectAllCheckbox.checked = true;
+      // Validate phone number
+      if (!phoneInput.value.trim()) {
+        phoneError.textContent = 'Phone number is required';
+        phoneError.style.display = 'block';
+        return;
       }
       
-      updateSelectedCount(validContacts);
-    });
-    
-    newDeselectAllBtn.addEventListener('click', () => {
-      // Deselect all contacts across all pages
-      validContacts.forEach(contact => {
-        contact._selected = false;
+      const formattedPhone = formatPhoneNumber(phoneInput.value.trim());
+      
+      // Check for duplicates
+      try {
+        const response = await api.checkDuplicatePhone(formattedPhone);
+        if (response && response.isDuplicate) {
+          phoneError.textContent = 'This phone number already exists in the database';
+          phoneError.style.display = 'block';
+        return;
+        }
+      } catch (error) {
+        console.error('Error checking duplicate phone:', error);
+      }
+      
+      // Update contact
+      contacts[index].name = document.getElementById('edit-preview-name').value.trim();
+      contacts[index].surname = document.getElementById('edit-preview-surname').value.trim();
+      contacts[index].phoneNumber = formattedPhone;
+      contacts[index].email = document.getElementById('edit-preview-email').value.trim();
+      contacts[index].birthday = document.getElementById('edit-preview-birthday').value;
+      
+      // Update validation status
+      contacts[index].valid = true;
+      contacts[index].error = null;
+      contacts[index].isDuplicate = false;
+      contacts[index].skip = false;
+      
+      // Recheck all contacts for duplicates
+      const phoneMap = new Map();
+      const duplicatePhones = new Set();
+      
+      // First pass: identify duplicates within the file
+      contacts.forEach((c, i) => {
+        if (c.phoneNumber && c.phoneNumber.trim() !== '') {
+          if (phoneMap.has(c.phoneNumber)) {
+            duplicatePhones.add(c.phoneNumber);
+          } else {
+            phoneMap.set(c.phoneNumber, i);
+          }
+        }
       });
       
-      // Update checkboxes on current page
-      document.querySelectorAll('.preview-contact-checkbox').forEach(checkbox => {
+      // Second pass: update duplicate status
+      contacts.forEach((c, i) => {
+        if (c.phoneNumber && duplicatePhones.has(c.phoneNumber)) {
+          c.isDuplicate = true;
+          c.error = 'Duplicate phone number in file';
+        } else {
+          c.isDuplicate = false;
+          c.error = null;
+        }
+      });
+      
+      // Update UI
+      updatePreviewTable();
+      updateSelectedCount();
+      
+      // Close modal
+      editModal.remove();
+    });
+  }
+  
+  // Set up event listeners for the preview modal
+  function setupPreviewEventListeners() {
+    // Tab switching
+    document.querySelectorAll('.preview-tab-link').forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        const tabId = e.target.getAttribute('data-tab');
+        
+        // Update active tab
+        document.querySelectorAll('.preview-tab-link').forEach(t => t.classList.remove('active'));
+        e.target.classList.add('active');
+        
+        // Show target tab content
+        document.querySelectorAll('.tab-content > div').forEach(content => {
+          content.classList.remove('active');
+          if (content.id === tabId) {
+            content.classList.add('active');
+          }
+        });
+      });
+    });
+    
+    // Select all button
+    document.getElementById('select-all-preview').addEventListener('click', (e) => {
+      document.querySelectorAll('.contact-preview-checkbox').forEach(checkbox => {
+        checkbox.checked = e.target.checked;
+      });
+      updateSelectedCount();
+    });
+    
+    // Deselect all button
+    document.getElementById('deselect-all-preview').addEventListener('click', () => {
+      document.querySelectorAll('.contact-preview-checkbox').forEach(checkbox => {
         checkbox.checked = false;
       });
-      
-      // Update select all checkbox
-      const selectAllCheckbox = document.getElementById('select-all-preview-contacts');
-      if (selectAllCheckbox) {
-        selectAllCheckbox.checked = false;
-      }
-      
-      updateSelectedCount(validContacts);
+      updateSelectedCount();
     });
-  }
-  
-  // Move to Valid button for skipped contacts
-  const moveToValidBtn = document.getElementById('move-to-valid');
-  if (moveToValidBtn) {
-    // Remove existing event listeners
-    const newMoveToValidBtn = moveToValidBtn.cloneNode(true);
-    moveToValidBtn.parentNode.replaceChild(newMoveToValidBtn, moveToValidBtn);
     
-    // Add new event listener
-    newMoveToValidBtn.addEventListener('click', () => {
-      // Find selected skipped contacts
-      const selectedSkipped = skippedContacts.filter(c => c._selected);
-      
-      if (selectedSkipped.length === 0) {
-        showNotification('No Contacts Selected', 'Please select skipped contacts to move', 'warning');
-        return;
-      }
-      
-      // Confirm action
-      if (!confirm(`Are you sure you want to move ${selectedSkipped.length} skipped contacts to the valid list?`)) {
-        return;
-      }
-      
-      // Update counters
-      let missingPhoneFixed = 0;
-      let duplicatesFixed = 0;
-      let otherIssuesFixed = 0;
-      
-      // Move selected contacts to valid
-      selectedSkipped.forEach(contact => {
-        // Find and remove from skipped contacts
-        const index = skippedContacts.findIndex(c => c._index === contact._index);
-        if (index !== -1) {
-          skippedContacts.splice(index, 1);
-          
-          // Update reason and status
-          contact._status = 'valid';
-          contact._selected = true; // Select by default when restored
-          
-          // Count by type
-          if (contact._skipReason === 'Missing phone number') {
-            missingPhoneFixed++;
-          } else if (contact._skipReason === 'Duplicate with existing contact' || 
-                     contact._skipReason === 'Duplicate phone number (auto-skipped)') {
-            duplicatesFixed++;
-          } else {
-            otherIssuesFixed++;
-          }
-          
-          // Clear the skip reason
-          delete contact._skipReason;
-          
-          // Add to valid
-          validContacts.push(contact);
+    // Skip selected button
+    document.getElementById('skip-selected-preview').addEventListener('click', () => {
+      document.querySelectorAll('.contact-preview-checkbox:checked').forEach(checkbox => {
+        const index = parseInt(checkbox.getAttribute('data-index'));
+        contacts[index].skip = true;
+      });
+      updatePreviewTable();
+      updateSelectedCount();
+    });
+    
+    // Skip all invalid button
+    document.getElementById('skip-all-invalid-btn').addEventListener('click', () => {
+      // Mark all invalid contacts as skipped
+      contacts.forEach((contact, index) => {
+        if (!contact.valid) {
+          contact.skip = true;
         }
       });
       
-      // Update stats
-      document.getElementById('preview-valid-count').textContent = validContacts.length;
-      
-      // Adjust issue counters
-      const missingPhoneCount = parseInt(document.getElementById('preview-missing-count').textContent) - missingPhoneFixed;
-      const duplicatesCount = parseInt(document.getElementById('preview-duplicates-count').textContent) - duplicatesFixed;
-      const otherIssuesCount = parseInt(document.getElementById('preview-issues-count').textContent) - otherIssuesFixed;
-      
-      document.getElementById('preview-missing-count').textContent = missingPhoneCount;
-      document.getElementById('preview-duplicates-count').textContent = duplicatesCount;
-      document.getElementById('preview-issues-count').textContent = otherIssuesCount;
-      
-      // Update pagination state
-      validContactsState.totalPages = Math.ceil(validContacts.length / validContactsState.pageSize);
-      skippedContactsState.totalPages = Math.ceil(skippedContacts.length / skippedContactsState.pageSize);
-      
-      // Re-render tables
-      renderValidContactsTable(validContactsState.currentPage);
-      renderSkippedContactsTable(Math.min(skippedContactsState.currentPage, skippedContactsState.totalPages || 1));
-      
-      // Update selected count
-      updateSelectedCount(validContacts);
-      
-      // Show notification
-      showNotification('Contacts Restored', `${selectedSkipped.length} contacts moved to valid list`, 'success');
+      // Update UI
+      updatePreviewTable();
+      updateSelectedCount();
     });
-  }
-  
-  // Skip selected button
-  const skipSelectedBtn = document.getElementById('skip-selected-preview');
-  if (skipSelectedBtn) {
-    // Remove existing event listeners
-    const newSkipSelectedBtn = skipSelectedBtn.cloneNode(true);
-    skipSelectedBtn.parentNode.replaceChild(newSkipSelectedBtn, skipSelectedBtn);
     
-    // Add new event listener
-    newSkipSelectedBtn.addEventListener('click', () => {
-      // Find selected contacts
-      const selectedContacts = validContacts.filter(c => c._selected);
-      
-      if (selectedContacts.length === 0) {
-        showNotification('No Contacts Selected', 'Please select contacts to skip', 'warning');
-        return;
-      }
-      
-      // Confirm action
-      if (!confirm(`Are you sure you want to skip ${selectedContacts.length} selected contacts?`)) {
-        return;
-      }
-      
-      // Move selected contacts to skipped
-      let duplicatesSkipped = 0;
-      selectedContacts.forEach(contact => {
-        // Find and remove from valid contacts
-        const index = validContacts.findIndex(c => c._index === contact._index);
-        if (index !== -1) {
-          validContacts.splice(index, 1);
-          
-          // Update reason and status
-          contact._selected = false;
-          contact._skipReason = 'Manually skipped';
-          contact._status = 'skipped';
-          
-          // Add to skipped
-          skippedContacts.push(contact);
-          
-          // Count if it was a duplicate
-          if (contact._isDuplicate) {
-            duplicatesSkipped++;
-          }
+    // Import all valid button
+    document.getElementById('import-all-valid-btn').addEventListener('click', () => {
+      // Make sure all valid contacts are selected
+      contacts.forEach((contact, index) => {
+        if (contact.valid) {
+          contact.skip = false;
         }
       });
       
-      // Update stats
-      document.getElementById('preview-valid-count').textContent = validContacts.length;
-      document.getElementById('preview-issues-count').textContent = parseInt(document.getElementById('preview-issues-count').textContent) + selectedContacts.length - duplicatesSkipped;
+      // Update UI
+      updatePreviewTable();
+      updateSelectedCount();
       
-      // Update pagination state
-      validContactsState.totalPages = Math.ceil(validContacts.length / validContactsState.pageSize);
-      skippedContactsState.totalPages = Math.ceil(skippedContacts.length / skippedContactsState.pageSize);
-      
-      // Re-render tables
-      renderValidContactsTable(Math.min(validContactsState.currentPage, validContactsState.totalPages || 1));
-      renderSkippedContactsTable(1);
-      
-      // Update selected count
-      updateSelectedCount(validContacts);
-      
-      // Show notification
-      showNotification('Contacts Skipped', `${selectedContacts.length} contacts moved to skipped list`, 'success');
+      // Trigger import
+      document.getElementById('complete-import').click();
     });
-  }
-  
-  // Skip duplicates button
-  const skipDuplicatesBtn = document.getElementById('skip-duplicates-preview');
-  if (skipDuplicatesBtn) {
-    // Remove existing event listeners
-    const newSkipDuplicatesBtn = skipDuplicatesBtn.cloneNode(true);
-    skipDuplicatesBtn.parentNode.replaceChild(newSkipDuplicatesBtn, skipDuplicatesBtn);
     
-    // Add new event listener
-    newSkipDuplicatesBtn.addEventListener('click', () => {
-      // Find duplicates
-      const duplicateContacts = validContacts.filter(c => c._isDuplicate);
-      
-      if (duplicateContacts.length === 0) {
-        showNotification('No Duplicates', 'There are no duplicate contacts to skip', 'info');
-        return;
-      }
-      
-      // Confirm action
-      if (!confirm(`Are you sure you want to skip all ${duplicateContacts.length} duplicate contacts?`)) {
-        return;
-      }
-      
-      // Move duplicate contacts to skipped
-      duplicateContacts.forEach(contact => {
-        // Find and remove from valid contacts
-        const index = validContacts.findIndex(c => c._index === contact._index);
-        if (index !== -1) {
-          validContacts.splice(index, 1);
-          
-          // Update reason and status
-          contact._selected = false;
-          contact._skipReason = 'Duplicate phone number (auto-skipped)';
-          contact._status = 'duplicate-file';
-          
-          // Add to skipped
-          skippedContacts.push(contact);
+    // Move to valid button
+    document.getElementById('move-to-valid').addEventListener('click', () => {
+      document.querySelectorAll('.skipped-preview-checkbox:checked').forEach(checkbox => {
+        const index = parseInt(checkbox.getAttribute('data-index'));
+        contacts[index].skip = false;
+        if (!contacts[index].valid) {
+          contacts[index].valid = true;
+          contacts[index].error = null;
         }
       });
-      
-      // Update stats
-      document.getElementById('preview-valid-count').textContent = validContacts.length;
-      document.getElementById('preview-duplicates-count').textContent = parseInt(document.getElementById('preview-duplicates-count').textContent);
-      
-      // Update pagination state
-      validContactsState.totalPages = Math.ceil(validContacts.length / validContactsState.pageSize);
-      skippedContactsState.totalPages = Math.ceil(skippedContacts.length / skippedContactsState.pageSize);
-      
-      // Re-render tables
-      renderValidContactsTable(Math.min(validContactsState.currentPage, validContactsState.totalPages || 1));
-      renderSkippedContactsTable(1);
-      
-      // Update selected count
-      updateSelectedCount(validContacts);
-      
-      // Show notification
-      showNotification('Duplicates Skipped', `${duplicateContacts.length} duplicate contacts moved to skipped list`, 'success');
+      updatePreviewTable();
+      updateSelectedCount();
     });
-  }
-  
-  // Skip all button
-  const skipAllBtn = document.getElementById('skip-all-preview');
-  if (skipAllBtn) {
-    // Remove existing event listeners
-    const newSkipAllBtn = skipAllBtn.cloneNode(true);
-    skipAllBtn.parentNode.replaceChild(newSkipAllBtn, skipAllBtn);
     
-    // Add new event listener
-    newSkipAllBtn.addEventListener('click', () => {
-      if (validContacts.length === 0) {
-        showNotification('No Contacts', 'There are no contacts to skip', 'warning');
-        return;
-      }
+    // Back to import button
+    document.getElementById('back-to-import').addEventListener('click', () => {
+      // Hide preview modal
+      modal.style.display = 'none';
       
-      // Confirm action
-      if (!confirm(`Are you sure you want to skip ALL ${validContacts.length} contacts? This will move everything to the skipped list.`)) {
-        return;
-      }
-      
-      // Move all contacts to skipped
-      while (validContacts.length > 0) {
-        const contact = validContacts.pop();
-        contact._selected = false;
-        contact._skipReason = 'Manually skipped (skip all)';
-        contact._status = 'skipped';
-        skippedContacts.push(contact);
-      }
-      
-      // Update stats
-      document.getElementById('preview-valid-count').textContent = '0';
-      document.getElementById('preview-issues-count').textContent = parseInt(document.getElementById('preview-issues-count').textContent) + skippedContacts.length;
-      
-      // Update pagination state
-      validContactsState.totalPages = 0;
-      skippedContactsState.totalPages = Math.ceil(skippedContacts.length / skippedContactsState.pageSize);
-      
-      // Re-render tables
-      renderValidContactsTable(1);
-      renderSkippedContactsTable(1);
-      
-      // Update selected count
-      updateSelectedCount(validContacts);
-      
-      // Show notification
-      showNotification('All Contacts Skipped', 'All contacts have been moved to the skipped list', 'success');
+      // Show import modal
+      document.getElementById('import-modal').style.display = 'block';
     });
-  }
   
   // Complete import button
-  const completeImportBtn = document.getElementById('complete-import');
-  if (completeImportBtn) {
-    // Remove existing event listeners
-    const newCompleteImportBtn = completeImportBtn.cloneNode(true);
-    completeImportBtn.parentNode.replaceChild(newCompleteImportBtn, completeImportBtn);
-    
-    // Add new event listener
-    newCompleteImportBtn.addEventListener('click', async () => {
+    document.getElementById('complete-import').addEventListener('click', async () => {
       try {
         // Get selected contacts
-        const selectedContacts = validContacts.filter(c => c._selected);
+        const selectedContacts = contacts.filter(c => c.valid && !c.skip);
         
         if (selectedContacts.length === 0) {
-          showNotification('No Contacts Selected', 'Please select at least one contact to import', 'warning');
+          showNotification('Warning', 'No contacts selected for import', 'warning');
           return;
         }
         
-        // Confirm import for large datasets
-        if (selectedContacts.length > 1000) {
-          if (!confirm(`You are about to import ${selectedContacts.length} contacts. This might take some time. Continue?`)) {
-            return;
-          }
-        }
+        // Show loading state
+        const importButton = document.getElementById('complete-import');
+        importButton.disabled = true;
+        importButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing...';
         
-        // Clean up contacts for import (remove internal properties)
-        const cleanContacts = selectedContacts.map(({ _index, _status, _selected, _skipReason, _isDuplicate, ...contact }) => ({
-          ...contact,
-          source: contact.source || getBaseName(filePath)
-        }));
+        // Import contacts
+        const response = await api.importContactsFromData(selectedContacts, selectedContacts[0].source);
         
-        // Close the preview modal
-        previewModal.style.display = 'none';
+        // Hide the preview modal
+        modal.style.display = 'none';
         
-        // Show loading notification
-        showNotification('Importing Contacts', `Importing ${cleanContacts.length} contacts...`, 'info');
-        
-        // Create progress dialog
-        const progressDialog = document.createElement('div');
-        progressDialog.className = 'progress-dialog';
-        progressDialog.innerHTML = `
-          <div class="progress-content">
-            <h3>Importing Contacts</h3>
-            <p>Importing <span id="import-count">${cleanContacts.length}</span> contacts...</p>
-            <div class="progress-bar-container">
-              <div id="import-progress-bar" class="progress-bar" style="width: 0%"></div>
-            </div>
-            <p id="import-status">0% complete</p>
-          </div>
-        `;
-        document.body.appendChild(progressDialog);
-        
-        // Set up progress handler
-        const progressListener = (event, progress) => {
-          const percent = Math.round((progress.imported + progress.duplicates + progress.errors) / progress.total * 100);
-          const progressBar = document.getElementById('import-progress-bar');
-          const statusText = document.getElementById('import-status');
-          
-          if (progressBar) progressBar.style.width = `${percent}%`;
-          if (statusText) {
-            statusText.textContent = `${percent}% complete (${progress.imported} imported, ${progress.duplicates} duplicates, ${progress.errors} errors)`;
-          }
-        };
-        
-        if (window.api && window.api.on) {
-          window.api.on('import-progress', progressListener);
-        }
-        
-        try {
-          // Start import
-          const result = await api.importContactsFromData(cleanContacts, filePath);
-          
-          // Remove progress dialog
-          document.body.removeChild(progressDialog);
-          
-          // Remove progress listener
-          if (window.api && window.api.removeAllListeners) {
-            window.api.removeAllListeners('import-progress');
-          }
-          
+        if (response.success !== false) {
           // Show success notification
           showNotification(
-            'Import Complete',
-            `Successfully imported ${result.imported} contacts. ${result.duplicates > 0 ? `${result.duplicates} duplicates skipped.` : ''} ${result.errors > 0 ? `${result.errors} errors.` : ''}`,
-            result.errors > 0 ? 'warning' : 'success'
+            'Success', 
+            `Imported ${response.imported} contacts (${response.duplicates} duplicates, ${response.errors} errors)`,
+            'success'
           );
           
           // Reload contacts
-          loadContactsPaginated();
-        } catch (error) {
-          // Remove progress dialog in case of error
-          document.body.removeChild(progressDialog);
+          await loadContactsPaginated();
           
-          // Remove progress listener
-          if (window.api && window.api.removeAllListeners) {
-            window.api.removeAllListeners('import-progress');
-          }
-          
-          console.error('Error during import:', error);
-          showNotification('Error', 'Failed to import contacts: ' + error.message, 'error');
+          // Update dashboard contacts count
+          updateDashboardContactsCount();
+        } else {
+          // Show error notification
+          showNotification('Error', response.message || 'Failed to import contacts', 'error');
         }
       } catch (error) {
-        console.error('Error completing import:', error);
-        showNotification('Error', 'Failed to complete import: ' + error.message, 'error');
+        console.error('Error importing contacts:', error);
+          showNotification('Error', 'Failed to import contacts: ' + error.message, 'error');
       }
     });
-  }
-  
-  // Close buttons
-  const closeButtons = previewModal.querySelectorAll('.close-modal');
-  closeButtons.forEach(button => {
-    // Remove existing event listeners
-    const newCloseButton = button.cloneNode(true);
-    button.parentNode.replaceChild(newCloseButton, button);
     
-    newCloseButton.addEventListener('click', () => {
-      previewModal.style.display = 'none';
+    // Close modal buttons
+    modal.querySelectorAll('.close-modal').forEach(button => {
+      button.addEventListener('click', () => {
+        modal.style.display = 'none';
     });
   });
   
-  // Back button
-  const backButton = document.getElementById('back-to-import');
-  if (backButton) {
-    // Remove existing event listeners
-    const newBackButton = backButton.cloneNode(true);
-    backButton.parentNode.replaceChild(newBackButton, backButton);
-    
-    newBackButton.addEventListener('click', () => {
-      previewModal.style.display = 'none';
+    // Event delegation for preview table actions
+    document.addEventListener('click', (e) => {
+      // Edit button
+      if (e.target.closest('.edit-preview-btn')) {
+        const button = e.target.closest('.edit-preview-btn');
+        const index = parseInt(button.getAttribute('data-index'));
+        editPreviewContact(index);
+      }
       
-      const importModal = document.getElementById('import-modal');
-      if (importModal) {
-        importModal.style.display = 'block';
+      // Skip button
+      if (e.target.closest('.skip-preview-btn')) {
+        const button = e.target.closest('.skip-preview-btn');
+        const index = parseInt(button.getAttribute('data-index'));
+        contacts[index].skip = true;
+        updatePreviewTable();
+        updateSelectedCount();
+      }
+      
+      // Restore button
+      if (e.target.closest('.restore-preview-btn')) {
+        const button = e.target.closest('.restore-preview-btn');
+        const index = parseInt(button.getAttribute('data-index'));
+        contacts[index].skip = false;
+        updatePreviewTable();
+        updateSelectedCount();
+      }
+    });
+    
+    // Checkbox change events
+    document.addEventListener('change', (e) => {
+      if (e.target.classList.contains('contact-preview-checkbox') || 
+          e.target.classList.contains('skipped-preview-checkbox')) {
+        updateSelectedCount();
       }
     });
   }
   
-  // Outside click to close
-  window.onclick = function(event) {
-    if (event.target === previewModal) {
-      previewModal.style.display = 'none';
-    }
-  };
-}
-
-/**
- * Update the selected contacts count in the import preview
- * @param {Array} validContacts - Array of valid contacts
- */
-function updateSelectedCount(validContacts) {
-  const selectedCount = validContacts.filter(c => c._selected).length;
-  const selectedCountElement = document.getElementById('selected-for-import-count');
-  if (selectedCountElement) {
-    selectedCountElement.textContent = selectedCount;
+  // Initialize the preview
+  updatePreviewTable();
+  setupPreviewEventListeners();
+  
+  // Show warning for large datasets
+  if (contacts.length > 1000) {
+    document.getElementById('large-dataset-warning').style.display = 'block';
+    document.getElementById('large-dataset-message').textContent = 
+      `For performance reasons, only ${PREVIEW_PAGE_SIZE} contacts are displayed per page. All ${contacts.length.toLocaleString()} contacts will be processed during import.`;
   }
 }
 
-// Export contacts module functions
+// Export functions for use in other modules
 export {
   initContacts,
   loadContactsPaginated,
   openContactModal,
-  saveContact,
   openImportModal,
-  browseFile,
-  importContacts,
-  deleteSelectedContacts,
-  showImportPreview,
-  setupPreviewEventListeners,
-  updateSelectedCount
+  deleteContact,
+  deleteSelectedContacts
 }; 

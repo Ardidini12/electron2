@@ -1,0 +1,443 @@
+/* Templates styling */
+
+/* Templates grid */
+.templates-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+/* Template card */
+.template-card {
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  padding: 15px;
+  transition: transform 0.2s, box-shadow 0.2s;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.template-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.template-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.template-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.template-content-preview {
+  margin-bottom: 15px;
+  font-size: 14px;
+  color: #666;
+  overflow-y: auto;
+  flex: 1;
+  word-break: break-word;
+}
+
+.template-image-thumbnail {
+  max-width: 100%;
+  max-height: 150px;
+  margin-top: 10px;
+  border-radius: 4px;
+}
+
+.template-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.template-actions button {
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 4px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.template-actions .edit-btn {
+  color: #0078d7;
+}
+
+.template-actions .delete-btn {
+  color: #d32f2f;
+}
+
+.template-actions .view-btn {
+  color: #388e3c;
+}
+
+.template-actions button:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Modal styling */
+.view-template-modal .modal-content {
+  max-width: 700px;
+}
+
+.template-view {
+  padding: 10px 0;
+}
+
+.template-view h2 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 10px;
+}
+
+.template-full-content {
+  padding: 10px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.template-full-image {
+  max-width: 100%;
+  margin-top: 15px;
+  border-radius: 4px;
+}
+
+/* Form elements */
+#template-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+#template-form label {
+  font-weight: 500;
+  margin-bottom: 5px;
+  display: block;
+}
+
+#template-form input[type="text"],
+#template-form textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+#template-form textarea {
+  min-height: 150px;
+  resize: vertical;
+}
+
+.template-image-container {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+#template-image-path {
+  flex: 1;
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+#template-image-preview {
+  max-width: 100%;
+  max-height: 200px !important;
+  margin-top: 10px;
+  margin-bottom: 20px !important;
+  border-radius: 4px;
+  border: 1px solid #ddd;
+  object-fit: contain;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 30px;
+  gap: 15px;
+}
+
+.pagination button {
+  padding: 8px 15px;
+  border: 1px solid #ddd;
+  background-color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.pagination button:hover:not(:disabled) {
+  background-color: #f0f0f0;
+}
+
+.pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination span {
+  font-size: 14px;
+  color: #666;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: #999;
+  font-size: 16px;
+}
+
+/* Loading and error states */
+.loading, .error {
+  text-align: center;
+  padding: 30px;
+  color: #666;
+}
+
+.error {
+  color: #d32f2f;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .templates-container {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  }
+}
+
+#template-modal .image-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 10px;
+}
+
+#template-modal .image-preview img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 4px;
+  object-fit: contain;
+  margin-bottom: 10px;
+}
+
+#template-modal #remove-image,
+.image-preview #remove-image {
+  display: inline-block !important;
+  visibility: visible !important;
+  margin-top: 10px;
+  padding: 8px 15px;
+  background-color: #e74c3c;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  text-align: center;
+  width: auto;
+  min-width: 150px;
+  opacity: 1;
+  transition: background-color 0.3s;
+  z-index: 100;
+}
+
+#template-modal #remove-image i {
+  margin-right: 5px;
+}
+
+#template-modal #remove-image:hover {
+  background-color: #c0392b;
+}
+
+#image-preview-container {
+  margin-top: 15px;
+  padding: 10px;
+  border: 1px solid #eee;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+}
+
+#image-preview-container label {
+  font-weight: 500;
+  display: block;
+  margin-bottom: 10px;
+}
+
+#image-preview-container .image-preview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.image-preview {
+  position: relative;
+  margin-top: 10px;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 1px solid #ddd;
+  padding: 10px;
+  border-radius: 8px;
+  background-color: #f9f9f9;
+}
+
+.image-preview img {
+  max-width: 100%;
+  max-height: 200px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  display: block;
+  object-fit: contain;
+  margin-bottom: 15px;
+}
+
+/* Position remove button below image with clear separation */
+.image-preview #remove-image,
+#template-modal #remove-image,
+button#remove-image {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  margin-top: 20px !important;
+  padding: 10px 15px !important;
+  background-color: #e74c3c !important;
+  color: white !important;
+  border: 2px solid #c0392b !important;
+  border-radius: 4px !important;
+  cursor: pointer !important;
+  font-size: 14px !important;
+  font-weight: bold !important;
+  text-align: center !important;
+  width: 100% !important;
+  min-width: 180px !important;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.2) !important;
+  z-index: 9999 !important;
+  position: relative !important;
+  clear: both !important;
+}
+
+/* Add hover effect for better user feedback */
+.image-preview #remove-image:hover,
+#template-modal #remove-image:hover,
+button#remove-image:hover {
+  background-color: #c0392b !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.3) !important;
+}
+
+/* Template variables help section */
+.template-variables-help {
+  margin-top: 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.variables-toggle {
+  display: flex;
+  align-items: center;
+  padding: 10px 15px;
+  background-color: #f5f5f5;
+  cursor: pointer;
+  user-select: none;
+}
+
+.variables-toggle:hover {
+  background-color: #efefef;
+}
+
+.variables-toggle i {
+  color: #2196F3;
+  margin-right: 8px;
+}
+
+.variables-toggle i:last-child {
+  margin-right: 0;
+  margin-left: auto;
+  transition: transform 0.3s ease;
+}
+
+.variables-toggle.open i:last-child {
+  transform: rotate(180deg);
+}
+
+.variables-content {
+  padding: 15px;
+  background-color: #fff;
+  border-top: 1px solid #e0e0e0;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 100;
+  position: relative;
+}
+
+.variables-content p {
+  margin: 0 0 15px 0;
+  color: #666;
+  font-size: 14px;
+}
+
+.variables-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin-bottom: 15px;
+}
+
+.variable-item {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px;
+  background-color: #f9f9f9;
+  border-radius: 4px;
+  border-left: 3px solid #2196F3;
+}
+
+.variable-item code {
+  font-family: monospace;
+  font-size: 14px;
+  color: #e91e63;
+  margin-bottom: 4px;
+  font-weight: bold;
+}
+
+.variable-item span {
+  font-size: 12px;
+  color: #666;
+}
+
+.variables-note {
+  font-style: italic;
+  font-size: 13px !important;
+  color: #888 !important;
+  margin-top: 10px !important;
+  border-top: 1px dashed #ddd;
+  padding-top: 10px;
+} 
