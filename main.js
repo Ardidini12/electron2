@@ -9,6 +9,7 @@ const whatsAppService = require('./src/services/WhatsAppService');
 const fs = require('fs');
 const { promisify } = require('util');
 const readFileAsync = promisify(fs.readFile); // Use promisify instead of fs/promises for compatibility
+const salesApiController = require('./src/controllers/SalesApiController');
 
 // Initialize the configuration store
 const store = new Store();
@@ -325,6 +326,14 @@ app.whenReady().then(async () => {
     });
     
     console.log('Application initialization completed successfully');
+
+    // Start the Sales API sync process
+    try {
+      salesApiController.startPeriodicSync();
+      console.log('Sales API sync started automatically on application launch');
+    } catch (error) {
+      console.error('Failed to start Sales API sync:', error);
+    }
   } catch (err) {
     console.error('Failed to initialize application:', err);
     
@@ -1334,5 +1343,71 @@ ipcMain.handle('delete-contacts', async (event, ids) => {
   } catch (error) {
     console.error('Error deleting contacts:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// Sales API operations
+ipcMain.handle('get-sales-contacts', async (event, options) => {
+  try {
+    return await salesApiController.getSalesContacts(options);
+  } catch (error) {
+    console.error('Error in get-sales-contacts handler:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('start-sales-sync', async () => {
+  try {
+    salesApiController.startPeriodicSync();
+    return { success: true };
+  } catch (error) {
+    console.error('Error in start-sales-sync handler:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('stop-sales-sync', async () => {
+  try {
+    salesApiController.stopPeriodicSync();
+    return { success: true };
+  } catch (error) {
+    console.error('Error in stop-sales-sync handler:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('get-sales-sync-status', async () => {
+  try {
+    return await salesApiController.getSyncStatus();
+  } catch (error) {
+    console.error('Error in get-sales-sync-status handler:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('delete-sales-contacts', async (event, ids) => {
+  try {
+    return await salesApiController.deleteSalesContacts(ids);
+  } catch (error) {
+    console.error('Error in delete-sales-contacts handler:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('delete-all-sales-contacts', async () => {
+  try {
+    return await salesApiController.deleteAllSalesContacts();
+  } catch (error) {
+    console.error('Error in delete-all-sales-contacts handler:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('get-available-cities', async () => {
+  try {
+    return salesApiController.getAvailableCities();
+  } catch (error) {
+    console.error('Error in get-available-cities handler:', error);
+    return { error: error.message };
   }
 });

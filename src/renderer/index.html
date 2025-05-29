@@ -665,32 +665,120 @@
       <!-- Sales API Section -->
       <section id="sales-api" class="content-section">
         <h1>Sales API</h1>
-        <div class="settings-container">
-          <div class="settings-card">
-            <h3>API Integration</h3>
-            <p>The Sales API allows you to integrate WhatsApp messaging capabilities with your existing systems. You can send messages, check status, and manage contacts programmatically.</p>
-            <div class="api-documentation">
-              <h4>Getting Started</h4>
-              <p>To use the API, you'll need to authenticate with your API key. Contact support to get your unique API key.</p>
-              
-              <h4>Example API Call</h4>
-              <pre><code>
-// Send a message using the API
-fetch('https://api.bss-sender.com/send', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer YOUR_API_KEY'
-  },
-  body: JSON.stringify({
-    to: '+1234567890',
-    message: 'Hello from the API!'
-  })
-})
-.then(response => response.json())
-.then(data => console.log(data))
-.catch(error => console.error('Error:', error));
-              </code></pre>
+        <div class="action-bar">
+          <div class="filter-container">
+            <label for="sales-city-filter">City:</label>
+            <select id="sales-city-filter" class="form-control">
+              <option value="">All Cities</option>
+              <!-- Cities will be added dynamically -->
+            </select>
+          </div>
+          <div class="filter-container">
+            <label for="sales-date-from">From:</label>
+            <input type="date" id="sales-date-from" class="form-control">
+          </div>
+          <div class="filter-container">
+            <label for="sales-date-to">To:</label>
+            <input type="date" id="sales-date-to" class="form-control">
+          </div>
+          <div class="search-container">
+            <input type="text" id="sales-search" placeholder="Search contacts...">
+            <button id="sales-search-btn">
+              <i class="fas fa-search"></i>
+            </button>
+          </div>
+        </div>
+        
+        <div class="sales-api-controls">
+          <div class="sync-status">
+            <div class="status-indicator" id="sales-sync-status"></div>
+            <span id="sales-sync-text">Sync Status: Not Running</span>
+            <div class="auto-refresh-info">
+              Auto-refresh in <span id="refresh-countdown">120</span>s
+              <button id="refresh-sales-data" class="refresh-btn" title="Refresh Now">
+                <i class="fas fa-sync-alt"></i>
+              </button>
+            </div>
+          </div>
+          <div class="sync-controls">
+            <button id="delete-selected-sales" class="danger-btn" disabled>
+              <i class="fas fa-trash"></i> Delete Selected
+            </button>
+            <button id="delete-all-sales" class="danger-btn">
+              <i class="fas fa-trash-alt"></i> Delete All
+            </button>
+          </div>
+        </div>
+        
+        <div class="last-sync-info" id="last-sync-info">
+          Last sync: <span id="last-sync-time">Never</span> | 
+          Next sync: <span id="next-sync-time">N/A</span>
+        </div>
+        
+        <div id="sync-stats-container" class="sync-stats-container">
+          <!-- Sync statistics will be populated here -->
+        </div>
+        
+        <div class="contacts-table-container">
+          <table id="sales-contacts-table" class="data-table">
+            <thead>
+              <tr>
+                <th width="30px">
+                  <input type="checkbox" id="select-all-sales-contacts">
+                </th>
+                <th data-sort="name">Name</th>
+                <th data-sort="phoneNumber">Phone</th>
+                <th data-sort="code">Code</th>
+                <th data-sort="city">City</th>
+                <th data-sort="documentNumber">Document #</th>
+                <th data-sort="documentDate">Document Date</th>
+                <th data-sort="createdAt">Created At</th>
+                <th width="50px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="sales-contacts-tbody">
+              <!-- Sales contacts will be loaded here -->
+            </tbody>
+          </table>
+        </div>
+        
+        <div id="sales-pagination" class="pagination-container">
+          <!-- Pagination will be added dynamically -->
+        </div>
+        
+        <!-- Delete Confirmation Modal -->
+        <div id="delete-sales-modal" class="modal">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h3>Confirm Delete</h3>
+              <button class="close-modal"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+              <p id="delete-sales-message"></p>
+            </div>
+            <div class="modal-footer">
+              <button id="confirm-delete-sales" class="danger-btn">Delete</button>
+              <button class="secondary-btn close-modal">Cancel</button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Contact Details Modal -->
+        <div id="sales-contact-details-modal" class="modal">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h3>Contact Details</h3>
+              <button class="close-modal"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+              <div id="sales-contact-details"></div>
+              <div class="source-data-container">
+                <h4>Source Data</h4>
+                <pre id="source-data"></pre>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button class="secondary-btn close-modal">Close</button>
             </div>
           </div>
         </div>
@@ -890,12 +978,16 @@ fetch('https://api.bss-sender.com/send', {
 
   <!-- Add this at the end of the body section, before the closing body tag -->
   <div id="whatsapp-corner-info" class="whatsapp-corner-info" draggable="true">
-    <div class="drag-handle"></div>
-    <div class="profile-container">
-      <img id="corner-profile-pic" class="corner-profile-pic" src="placeholder.png" alt="Profile">
-      <div class="corner-info-text">
-        <div id="corner-phone-name" class="corner-phone-name">Not Connected</div>
-        <div id="corner-phone-number" class="corner-phone-number"></div>
+    <div class="toggle-collapse">
+      <i class="fas fa-chevron-left"></i>
+    </div>
+    <div class="info-content">
+      <div class="profile-container">
+        <img id="corner-profile-pic" class="corner-profile-pic" src="placeholder.png" alt="Profile">
+        <div class="corner-info-text">
+          <div id="corner-phone-name" class="corner-phone-name">Not Connected</div>
+          <div id="corner-phone-number" class="corner-phone-number"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -909,7 +1001,7 @@ fetch('https://api.bss-sender.com/send', {
       color: white;
       border-radius: 12px;
       padding: 6px 10px;
-      display: none;
+      display: flex;
       z-index: 9999;
       box-shadow: 0 3px 12px rgba(0,0,0,0.3);
       transition: transform 0.2s ease, background-color 0.3s ease;
@@ -919,6 +1011,49 @@ fetch('https://api.bss-sender.com/send', {
       border: 1px solid rgba(255,255,255,0.2);
       user-select: none;
       touch-action: none;
+      align-items: center;
+    }
+    
+    .whatsapp-corner-info.collapsed {
+      max-width: 30px;
+      padding: 8px 8px;
+      overflow: hidden;
+    }
+    
+    .toggle-collapse {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      background-color: rgba(255,255,255,0.1);
+      border-radius: 50%;
+      margin-right: 5px;
+      flex-shrink: 0;
+      z-index: 1;
+    }
+    
+    .toggle-collapse:hover {
+      background-color: rgba(255,255,255,0.2);
+    }
+    
+    .whatsapp-corner-info.collapsed .toggle-collapse i {
+      transform: rotate(180deg);
+    }
+    
+    .info-content {
+      display: flex;
+      flex-direction: column;
+      transition: max-width 0.3s ease, opacity 0.3s ease;
+      max-width: 190px;
+      opacity: 1;
+    }
+    
+    .whatsapp-corner-info.collapsed .info-content {
+      max-width: 0;
+      opacity: 0;
+      margin-left: -5px;
     }
     
     /* Connection status colors */
@@ -942,19 +1077,6 @@ fetch('https://api.bss-sender.com/send', {
       opacity: 0.8;
       transform: scale(1.05);
       box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    }
-    
-    .drag-handle {
-      position: absolute;
-      top: 2px;
-      left: 0;
-      right: 0;
-      height: 6px;
-      cursor: move;
-      border-radius: 3px;
-      background-color: rgba(255,255,255,0.15);
-      width: 40px;
-      margin: 0 auto;
     }
     
     .whatsapp-corner-info:hover {
@@ -1053,17 +1175,43 @@ fetch('https://api.bss-sender.com/send', {
     // Add drag functionality to the WhatsApp corner info
     document.addEventListener('DOMContentLoaded', () => {
       const cornerInfo = document.getElementById('whatsapp-corner-info');
-      if (!cornerInfo) return;
+      const toggleCollapse = document.querySelector('.toggle-collapse');
+      
+      if (!cornerInfo || !toggleCollapse) return;
       
       let isDragging = false;
       let offsetX = 0;
       let offsetY = 0;
       let moveCount = 0; // Track how many move events we've received
       let dragStartPosition = { x: 0, y: 0 }; // Starting position
+      let isCollapsed = false;
+      
+      // Toggle collapse
+      toggleCollapse.addEventListener('click', (e) => {
+        // Don't trigger a drag when clicking the toggle button
+        e.stopPropagation();
+        
+        isCollapsed = !isCollapsed;
+        
+        if (isCollapsed) {
+          cornerInfo.classList.add('collapsed');
+        } else {
+          cornerInfo.classList.remove('collapsed');
+        }
+        
+        // Save the collapsed state
+        localStorage.setItem('whatsappCornerCollapsed', isCollapsed);
+      });
       
       // Load saved position from localStorage
       function loadPosition() {
         try {
+          // Load collapsed state
+          isCollapsed = localStorage.getItem('whatsappCornerCollapsed') === 'true';
+          if (isCollapsed) {
+            cornerInfo.classList.add('collapsed');
+          }
+          
           const savedPosition = localStorage.getItem('whatsappCornerPosition');
           if (savedPosition) {
             const { left, top } = JSON.parse(savedPosition);
@@ -1219,6 +1367,7 @@ fetch('https://api.bss-sender.com/send', {
         contextMenu.className = 'whatsapp-context-menu';
         contextMenu.innerHTML = `
           <div class="context-menu-item" id="reset-position">Reset Position</div>
+          <div class="context-menu-item" id="toggle-collapse">${isCollapsed ? 'Expand' : 'Collapse'}</div>
         `;
         
         // Style the context menu
@@ -1274,6 +1423,19 @@ fetch('https://api.bss-sender.com/send', {
           cornerInfo.style.bottom = '15px';
           cornerInfo.style.top = 'auto';
           localStorage.removeItem('whatsappCornerPosition');
+          closeContextMenu();
+        });
+        
+        // Handle toggle collapse
+        const toggleButton = contextMenu.querySelector('#toggle-collapse');
+        toggleButton.addEventListener('click', () => {
+          isCollapsed = !isCollapsed;
+          if (isCollapsed) {
+            cornerInfo.classList.add('collapsed');
+          } else {
+            cornerInfo.classList.remove('collapsed');
+          }
+          localStorage.setItem('whatsappCornerCollapsed', isCollapsed);
           closeContextMenu();
         });
         

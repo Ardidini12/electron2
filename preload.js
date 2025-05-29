@@ -63,6 +63,15 @@ function exposeAPI() {
       getAutoConnectWhatsApp: () => ipcRenderer.invoke('get-auto-connect-whatsapp'),
       checkWhatsAppRequirements: () => ipcRenderer.invoke('check-whatsapp-requirements'),
       
+      // Sales API operations
+      getSalesContacts: (options) => ipcRenderer.invoke('get-sales-contacts', options),
+      startSalesSync: () => ipcRenderer.invoke('start-sales-sync'),
+      stopSalesSync: () => ipcRenderer.invoke('stop-sales-sync'),
+      getSalesSyncStatus: () => ipcRenderer.invoke('get-sales-sync-status'),
+      deleteSalesContacts: (ids) => ipcRenderer.invoke('delete-sales-contacts', ids),
+      deleteAllSalesContacts: () => ipcRenderer.invoke('delete-all-sales-contacts'),
+      getAvailableCities: () => ipcRenderer.invoke('get-available-cities'),
+      
       // Message operations
       getScheduledMessages: (status) => ipcRenderer.invoke('get-scheduled-messages', status),
       getScheduledMessage: (id) => ipcRenderer.invoke('get-scheduled-message', id),

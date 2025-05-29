@@ -93,18 +93,21 @@ const ContactModel = require('../models/Contact');
 const TemplateModel = require('../models/Template');
 const MessageModel = require('../models/Message');
 const ScheduleSettingsModel = require('../models/ScheduleSettings');
+const SalesContactModel = require('../models/SalesContact');
     
 // Initialize models with the single sequelize instance
 const Contact = ContactModel(sequelize);
 const Template = TemplateModel(sequelize);
 const Message = MessageModel(sequelize);
 const ScheduleSettings = ScheduleSettingsModel(sequelize);
+const SalesContact = SalesContactModel(sequelize);
     
 const models = {
   Contact,
   Template,
   Message,
-  ScheduleSettings
+  ScheduleSettings,
+  SalesContact
 };
 
 // Define associations between models
@@ -128,6 +131,13 @@ async function ensureTablesExist() {
       await sequelize.query('SELECT 1 FROM Templates LIMIT 1');
       await sequelize.query('SELECT 1 FROM Messages LIMIT 1');
       await sequelize.query('SELECT 1 FROM ScheduleSettings LIMIT 1');
+      // Check if SalesContacts exists but don't fail if it doesn't
+      try {
+        await sequelize.query('SELECT 1 FROM SalesContacts LIMIT 1');
+        console.log('SalesContacts table exists');
+      } catch (err) {
+        console.log('SalesContacts table does not exist, will create it');
+      }
       tablesExist = true;
     } catch (err) {
       console.log('Tables do not exist, need to create them');
@@ -153,6 +163,14 @@ async function ensureTablesExist() {
         console.log('Default schedule settings created');
       }
     } else {
+      // Only sync the SalesContacts table if it doesn't exist
+      try {
+        await sequelize.query('SELECT 1 FROM SalesContacts LIMIT 1');
+      } catch (err) {
+        console.log('Creating SalesContacts table...');
+        await SalesContact.sync({ force: false });
+        console.log('SalesContacts table created successfully');
+      }
       console.log('All required tables already exist');
     }
     

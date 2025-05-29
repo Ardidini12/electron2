@@ -95,6 +95,58 @@ async function runMigration() {
         console.log(`Found ${sendingCount} records with 'SENDING' status.`);
       }
 
+      // Check if SalesContacts table exists
+      let needsSalesContactsTable = false;
+      try {
+        await sequelize.query('SELECT 1 FROM SalesContacts LIMIT 1', { transaction });
+        console.log('SalesContacts table already exists');
+      } catch (error) {
+        needsSalesContactsTable = true;
+        console.log('Need to create SalesContacts table');
+      }
+
+      // Create SalesContacts table if needed
+      if (needsSalesContactsTable) {
+        console.log('Creating SalesContacts table...');
+        
+        await sequelize.query(`
+          CREATE TABLE IF NOT EXISTS SalesContacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            contactId INTEGER,
+            name VARCHAR(255) NOT NULL,
+            phoneNumber VARCHAR(255) NOT NULL,
+            code VARCHAR(255),
+            city VARCHAR(255),
+            documentNumber VARCHAR(255),
+            documentDate DATETIME,
+            shopId VARCHAR(255),
+            sourceData TEXT,
+            imported BOOLEAN DEFAULT 0,
+            importedAt DATETIME,
+            createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `, { transaction });
+        
+        // Create indexes
+        await sequelize.query(
+          'CREATE INDEX IF NOT EXISTS sales_contact_phone_idx ON SalesContacts (phoneNumber)',
+          { transaction }
+        );
+        
+        await sequelize.query(
+          'CREATE INDEX IF NOT EXISTS sales_contact_city_idx ON SalesContacts (city)',
+          { transaction }
+        );
+        
+        await sequelize.query(
+          'CREATE INDEX IF NOT EXISTS sales_contact_date_idx ON SalesContacts (documentDate)',
+          { transaction }
+        );
+        
+        console.log('Created SalesContacts table and indexes');
+      }
+
       console.log('Migration completed successfully!');
     });
 

@@ -114,7 +114,8 @@ async function loadAppModules() {
       templatesModule,
       settingsModule,
       bulkSenderModule,
-      scheduledModule
+      scheduledModule,
+      salesApiModule
     ] = await Promise.all([
       import('./modules/dashboard/dashboard.js'),
       import('./modules/ui/notifications.js'),
@@ -124,7 +125,8 @@ async function loadAppModules() {
       import('./modules/templates/templates.js'),
       import('./modules/settings/settings.js'),
       import('./modules/bulksender/bulksender.js'),
-      import('./modules/scheduled/scheduled.js')
+      import('./modules/scheduled/scheduled.js'),
+      import('./modules/sales-api/sales-api.js')
     ]);
     
     return {
@@ -171,6 +173,9 @@ async function loadAppModules() {
       loadScheduledMessages: scheduledModule.loadScheduledMessages,
       updateMessageStatus: scheduledModule.updateMessageStatus,
       
+      // Sales API functions
+      SalesApiModule: salesApiModule.default,
+      
       // Helpers
       helpers: helpersModule
     };
@@ -199,6 +204,9 @@ function startApp(modules) {
   modules.initSettings();
   modules.initBulkSender();
   modules.initScheduled();
+  
+  // Initialize Sales API module
+  window.salesApiModule = new modules.SalesApiModule();
   
   // Set up WhatsApp connection
   modules.setupWhatsAppConnection();
@@ -415,6 +423,24 @@ function setupNavigation(modules) {
               }, 100); // Small delay to ensure DOM is updated
               break;
             
+            case 'sales-api':
+              console.log('Sales API section activated, initializing or refreshing...');
+              setTimeout(async () => {
+                try {
+                  if (window.salesApiModule) {
+                    console.log('Sales API module exists, initializing...');
+                    await window.salesApiModule.init();
+                  } else {
+                    console.log('Creating new Sales API module instance...');
+                    window.salesApiModule = new modules.SalesApiModule();
+                    await window.salesApiModule.init();
+                  }
+                } catch (error) {
+                  console.error('Error initializing Sales API module:', error);
+                }
+              }, 100); // Small delay to ensure DOM is updated
+              break;
+            
             case 'settings':
               console.log('Settings section activated, refreshing settings...');
               // Force settings refresh when entering the view
@@ -470,6 +496,23 @@ function setupNavigation(modules) {
       case 'scheduled':
         setTimeout(() => {
           modules.loadScheduledMessages();
+        }, 500);
+        break;
+      
+      case 'sales-api':
+        setTimeout(async () => {
+          try {
+            if (window.salesApiModule) {
+              console.log('Sales API module exists, initializing...');
+              await window.salesApiModule.init();
+            } else {
+              console.log('Creating new Sales API module instance...');
+              window.salesApiModule = new modules.SalesApiModule();
+              await window.salesApiModule.init();
+            }
+          } catch (error) {
+            console.error('Error initializing Sales API module:', error);
+          }
         }, 500);
         break;
       
