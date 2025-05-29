@@ -605,6 +605,30 @@ class MessageController {
   }
   
   /**
+   * Stop the message scheduler
+   * @returns {Promise<boolean>} - Success status
+   */
+  async stopScheduler() {
+    try {
+      if (this.mainCronJob) {
+        this.mainCronJob.stop();
+        console.log('Message scheduler stopped successfully');
+      }
+      
+      // Clear any pending message timeouts
+      Object.keys(this.messageTimeouts).forEach(id => {
+        clearTimeout(this.messageTimeouts[id]);
+        delete this.messageTimeouts[id];
+      });
+      
+      return true;
+    } catch (error) {
+      console.error('Error stopping scheduler:', error);
+      return false;
+    }
+  }
+  
+  /**
    * Resume processing of any pending messages after app restart
    * @returns {Promise<number>} - Number of messages resumed
    */

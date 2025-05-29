@@ -908,35 +908,19 @@ ipcMain.handle('init-whatsapp', async (event, forceNewQR = false) => {
     }
     
     // Initialize WhatsApp client
-    try {
-      await whatsAppService.initialize();
-    } catch (error) {
-      console.error('Error initializing WhatsApp client:', error);
-      
-      // Check if this is a browser disconnection or navigation error
-      if (error.message && (
-          error.message.includes('browser has disconnected') || 
-          error.message.includes('Navigation failed') ||
-          error.message.includes('Browser closed'))) {
-        
-        // Notify the renderer about browser disconnection
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('browser-disconnected');
-        }
-      }
-      
-      throw error;
-    }
-    
-    // Return status with session info
-    return { 
-      success: true,
-      hasExistingSession: whatsAppService.hasExistingSession(),
-      isConnected: whatsAppService.getStatus().isConnected
-    };
+    return await whatsAppService.initialize(forceNewQR);
   } catch (error) {
     console.error('Error in init-whatsapp handler:', error);
-    throw error;
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('check-whatsapp-requirements', async () => {
+  try {
+    return await whatsAppService.checkSystemRequirements();
+  } catch (error) {
+    console.error('Error checking WhatsApp requirements:', error);
+    return { error: error.message };
   }
 });
 

@@ -61,6 +61,7 @@ function exposeAPI() {
       refreshWhatsAppInfo: () => ipcRenderer.invoke('refresh-whatsapp-info'),
       setAutoConnectWhatsApp: (enabled) => ipcRenderer.invoke('set-auto-connect-whatsapp', enabled),
       getAutoConnectWhatsApp: () => ipcRenderer.invoke('get-auto-connect-whatsapp'),
+      checkWhatsAppRequirements: () => ipcRenderer.invoke('check-whatsapp-requirements'),
       
       // Message operations
       getScheduledMessages: (status) => ipcRenderer.invoke('get-scheduled-messages', status),

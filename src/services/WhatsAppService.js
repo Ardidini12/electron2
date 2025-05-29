@@ -47,70 +47,54 @@ class WhatsAppService extends EventEmitter {
       console.log('WhatsApp initialization already in progress');
       return { success: false, error: 'Initialization already in progress' };
     }
+    
     this.initInProgress = true;
+    
     try {
-      await this.cleanupBrowserSession();
-      const sessionExists = this.hasExistingSession();
-      if (forceNewQR && sessionExists) {
-        console.log('Force new QR requested, deleting existing session');
+      // Check for existing session
+      const hasSession = this.hasExistingSession();
+      
+      if (forceNewQR && hasSession) {
+        console.log('Force new QR requested, deleting existing session first');
         await this.deleteSessionData();
       }
-      // Ensure session folder exists
-      if (!fs.existsSync(this.sessionPath)) {
-        fs.mkdirSync(this.sessionPath, { recursive: true });
-        console.log(`Created WhatsApp session directory at: ${this.sessionPath}`);
+      
+      // Clean up any existing client connection
+      try {
+        if (this.client) {
+          await this.cleanupBrowserSession();
+        }
+      } catch (cleanupError) {
+        console.error('Error during client cleanup:', cleanupError);
       }
-      // Use a temp directory for Puppeteer userDataDir (not sessionPath)
-      const puppeteerUserDataDir = path.join(os.tmpdir(), 'bss-sender-puppeteer');
-      if (!fs.existsSync(puppeteerUserDataDir)) {
-        fs.mkdirSync(puppeteerUserDataDir, { recursive: true });
-      }
-      // Puppeteer options (headless, no userDataDir)
+      
+      console.log('[WA DEBUG] Setting up WhatsApp event listeners');
+      
+      // Configure Puppeteer options
+      let LATEST_WEB_VERSION = '2.2314.7';
+      
+      // Configure Puppeteer options
       const puppeteerOpts = {
+        headless: true,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
           '--disable-dev-shm-usage',
           '--disable-accelerated-2d-canvas',
           '--no-first-run',
-          '--no-default-browser-check',
-          '--disable-extensions',
+          '--no-zygote',
           '--disable-gpu',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--disable-renderer-backgrounding',
+          '--deterministic-fetch',
           '--disable-features=site-per-process',
-          '--disable-web-security',
-          '--ignore-certificate-errors',
-          '--allow-running-insecure-content',
-          '--disable-popup-blocking',
-          '--disable-component-update',
-          '--window-size=1280,900'
+          '--disable-extensions',
+          '--disable-notifications'
         ],
-        headless: true,
-        timeout: 120000,
-        handleSIGINT: false,
-        handleSIGTERM: false,
-        handleSIGHUP: false,
-        ignoreHTTPSErrors: true,
-        defaultViewport: { width: 1280, height: 900 }
+        executablePath: process.platform === 'win32' 
+          ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
+          : undefined
       };
-      // Windows: try to use system Chrome/Edge if available
-      if (process.platform === 'win32') {
-        const possiblePaths = [
-          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
-        ];
-        for (const browserPath of possiblePaths) {
-          if (fs.existsSync(browserPath)) {
-            puppeteerOpts.executablePath = browserPath;
-            break;
-          }
-        }
-      }
-      const LATEST_WEB_VERSION = '2.2414.2';
+      
+      // Create client with updated configuration
       this.client = new Client({
         authStrategy: new LocalAuth({
           dataPath: this.sessionPath,
@@ -777,18 +761,37 @@ class WhatsAppService extends EventEmitter {
   async getConnectedPhoneInfo() {
     try {
       if (!this.client || !this.status.isConnected) {
+        console.log('Cannot get phone info: WhatsApp client not connected');
         return { phoneNumber: 'Unknown', name: 'Unknown', connected: false };
       }
 
-      const info = await this.client.info;
-      if (!info) {
+      // Wait a moment to ensure the client info is fully loaded
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Get client info more safely
+      let info;
+      try {
+        info = await this.client.info;
+        console.log('Retrieved client info:', JSON.stringify(info || {}, null, 2));
+      } catch (infoError) {
+        console.error('Error getting client info:', infoError);
+        return { phoneNumber: 'Unknown', name: 'Unknown', connected: false };
+      }
+      
+      if (!info || !info.wid) {
+        console.log('No valid info or wid found in client info');
         return { phoneNumber: 'Unknown', name: 'Unknown', connected: false };
       }
 
       // Try to get profile picture URL
       let profilePictureUrl = null;
       try {
-        if (info.wid && info.wid.user) {
+        if (info.wid && info.wid._serialized) {
+          const profilePic = await this.client.getProfilePicUrl(info.wid._serialized);
+          if (profilePic) {
+            profilePictureUrl = profilePic;
+          }
+        } else if (info.wid && info.wid.user) {
           const profilePic = await this.client.getProfilePicUrl(`${info.wid.user}@c.us`);
           if (profilePic) {
             profilePictureUrl = profilePic;
@@ -798,8 +801,20 @@ class WhatsAppService extends EventEmitter {
         console.log('Could not get profile picture:', picError.message);
       }
 
+      // Try to get phone number in multiple ways
+      let phoneNumber = 'Unknown';
+      if (info.wid && info.wid.user) {
+        phoneNumber = info.wid.user;
+      } else if (info.wid && info.wid._serialized) {
+        // Extract phone number from serialized ID (format: "number@c.us")
+        const match = info.wid._serialized.match(/^(\d+)@/);
+        if (match && match[1]) {
+          phoneNumber = match[1];
+        }
+      }
+
       return {
-        phoneNumber: info.wid.user || 'Unknown',
+        phoneNumber: phoneNumber,
         name: info.pushname || 'Unknown',
         connected: true,
         profilePictureUrl
@@ -1106,6 +1121,90 @@ class WhatsAppService extends EventEmitter {
       }
     } catch (error) {
       console.error('Error clearing session caches:', error);
+    }
+  }
+
+  /**
+   * Check system for potential WhatsApp connection issues
+   * @returns {Promise<Object>} - Diagnostic information
+   */
+  async checkSystemRequirements() {
+    try {
+      const diagnostics = {
+        chromeInstalled: false,
+        chromePath: null,
+        nodeVersion: process.version,
+        platform: process.platform,
+        puppeteerVersion: 'Unknown',
+        whatsappWebVersion: 'Unknown',
+        issues: [],
+        suggestions: []
+      };
+
+      // Check Chrome installation
+      const possibleChromePaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+      ];
+
+      for (const browserPath of possibleChromePaths) {
+        if (fs.existsSync(browserPath)) {
+          diagnostics.chromeInstalled = true;
+          diagnostics.chromePath = browserPath;
+          break;
+        }
+      }
+
+      if (!diagnostics.chromeInstalled) {
+        diagnostics.issues.push('Chrome or Edge browser not found');
+        diagnostics.suggestions.push('Install Google Chrome or Microsoft Edge');
+      }
+
+      // Check Node.js version
+      const nodeVersionMatch = process.version.match(/^v(\d+)/);
+      if (nodeVersionMatch && parseInt(nodeVersionMatch[1]) < 16) {
+        diagnostics.issues.push('Node.js version is outdated');
+        diagnostics.suggestions.push('Update Node.js to version 16 or later');
+      }
+
+      // Check puppeteer version
+      try {
+        const puppeteerPkg = require('puppeteer/package.json');
+        diagnostics.puppeteerVersion = puppeteerPkg.version;
+      } catch (e) {
+        diagnostics.issues.push('Could not determine Puppeteer version');
+      }
+
+      // Check whatsapp-web.js version
+      try {
+        const wwjsPkg = require('whatsapp-web.js/package.json');
+        diagnostics.whatsappWebVersion = wwjsPkg.version;
+      } catch (e) {
+        diagnostics.issues.push('Could not determine whatsapp-web.js version');
+      }
+
+      // Add general suggestions
+      diagnostics.suggestions.push('Make sure Chromium dependencies are installed');
+      diagnostics.suggestions.push('Ensure no firewall is blocking Chrome/Puppeteer');
+      diagnostics.suggestions.push('Try running the app with admin privileges');
+      
+      if (process.platform === 'win32') {
+        diagnostics.suggestions.push('On Windows, try disabling antivirus temporarily');
+      }
+
+      return diagnostics;
+    } catch (error) {
+      console.error('Error checking system requirements:', error);
+      return {
+        error: error.message,
+        suggestions: [
+          'Install Google Chrome or Microsoft Edge',
+          'Make sure Chromium dependencies are installed',
+          'Try running the app with admin privileges'
+        ]
+      };
     }
   }
 }
