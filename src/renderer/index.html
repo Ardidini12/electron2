@@ -90,8 +90,12 @@
           <span>Bulk Sender</span>
         </li>
         <li class="nav-item" data-target="scheduled">
-          <i class="fas fa-calendar-alt"></i>
-          <span>Scheduled</span>
+          <i class="fas fa-calendar"></i>
+          <span>Scheduled Messages</span>
+        </li>
+        <li class="nav-item" data-target="sales-api">
+          <i class="fas fa-code"></i>
+          <span>Sales API</span>
         </li>
         <li class="nav-item" data-target="settings">
           <i class="fas fa-cog"></i>
@@ -658,6 +662,40 @@
         </div>
       </section>
 
+      <!-- Sales API Section -->
+      <section id="sales-api" class="content-section">
+        <h1>Sales API</h1>
+        <div class="settings-container">
+          <div class="settings-card">
+            <h3>API Integration</h3>
+            <p>The Sales API allows you to integrate WhatsApp messaging capabilities with your existing systems. You can send messages, check status, and manage contacts programmatically.</p>
+            <div class="api-documentation">
+              <h4>Getting Started</h4>
+              <p>To use the API, you'll need to authenticate with your API key. Contact support to get your unique API key.</p>
+              
+              <h4>Example API Call</h4>
+              <pre><code>
+// Send a message using the API
+fetch('https://api.bss-sender.com/send', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_API_KEY'
+  },
+  body: JSON.stringify({
+    to: '+1234567890',
+    message: 'Hello from the API!'
+  })
+})
+.then(response => response.json())
+.then(data => console.log(data))
+.catch(error => console.error('Error:', error));
+              </code></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Settings Section -->
       <section id="settings" class="content-section">
         <h1>Settings</h1>
@@ -1054,26 +1092,21 @@
       
       // Handle drag start
       cornerInfo.addEventListener('mousedown', (e) => {
-        // Only start dragging if we're on the drag handle or this is a right click
-        const isOnDragHandle = e.target.classList.contains('drag-handle');
-        const isRightClick = e.button === 2;
+        // Allow dragging from anywhere in the phone info box, no need to check for drag handle
+        isDragging = true;
+        cornerInfo.classList.add('dragging');
         
-        if (isOnDragHandle || isRightClick || e.ctrlKey) {
-          isDragging = true;
-          cornerInfo.classList.add('dragging');
-          
-          // Store initial positions
-          dragStartPosition = { x: e.clientX, y: e.clientY };
-          moveCount = 0;
-          
-          // Calculate the offset from the mouse position to the element's top-left corner
-          const rect = cornerInfo.getBoundingClientRect();
-          offsetX = e.clientX - rect.left;
-          offsetY = e.clientY - rect.top;
-          
-          // Prevent text selection while dragging
-          e.preventDefault();
-        }
+        // Store initial positions
+        dragStartPosition = { x: e.clientX, y: e.clientY };
+        moveCount = 0;
+        
+        // Calculate the offset from the mouse position to the element's top-left corner
+        const rect = cornerInfo.getBoundingClientRect();
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+        
+        // Prevent text selection while dragging
+        e.preventDefault();
       });
       
       // Handle drag
@@ -1122,23 +1155,20 @@
         }
       });
       
-      // Also handle touch events for mobile
+      // Also handle touch events for mobile - allow dragging from anywhere
       cornerInfo.addEventListener('touchstart', (e) => {
-        // Only start dragging on drag handle for touch
-        if (e.target.classList.contains('drag-handle')) {
-          isDragging = true;
-          cornerInfo.classList.add('dragging');
-          moveCount = 0;
-          
-          const touch = e.touches[0];
-          dragStartPosition = { x: touch.clientX, y: touch.clientY };
-          
-          const rect = cornerInfo.getBoundingClientRect();
-          offsetX = touch.clientX - rect.left;
-          offsetY = touch.clientY - rect.top;
-          
-          e.preventDefault();
-        }
+        isDragging = true;
+        cornerInfo.classList.add('dragging');
+        moveCount = 0;
+        
+        const touch = e.touches[0];
+        dragStartPosition = { x: touch.clientX, y: touch.clientY };
+        
+        const rect = cornerInfo.getBoundingClientRect();
+        offsetX = touch.clientX - rect.left;
+        offsetY = touch.clientY - rect.top;
+        
+        e.preventDefault();
       });
       
       document.addEventListener('touchmove', (e) => {

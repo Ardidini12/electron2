@@ -2109,4 +2109,44 @@ input[type="checkbox"] {
 #delete-selected-messages:disabled {
   background-color: #ccc;
   cursor: not-allowed;
+}
+
+/* API Documentation Styles */
+.api-documentation {
+  margin-top: 20px;
+}
+
+.api-documentation h4 {
+  margin-top: 15px;
+  margin-bottom: 10px;
+  color: #2c3e50;
+  font-size: 16px;
+}
+
+.api-documentation p {
+  margin-bottom: 15px;
+  line-height: 1.5;
+}
+
+.api-documentation pre {
+  background-color: #f8f9fa;
+  border-radius: 4px;
+  padding: 15px;
+  overflow-x: auto;
+  margin: 15px 0;
+  border: 1px solid #e9ecef;
+}
+
+.api-documentation code {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 14px;
+  color: #333;
+}
+
+/* Media query for API docs on smaller screens */
+@media (max-width: 768px) {
+  .api-documentation pre {
+    padding: 10px;
+    font-size: 12px;
+  }
 } 
