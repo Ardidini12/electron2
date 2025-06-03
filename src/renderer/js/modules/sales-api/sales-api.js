@@ -29,7 +29,7 @@ export default class SalesApiModule {
       search: '',
       startDate: '',
       endDate: '',
-      sortBy: 'createdAt',
+      sortBy: 'documentDate',  // Default sort by document date
       sortOrder: 'DESC'
     };
     this.selectedContacts = new Set();
@@ -41,6 +41,9 @@ export default class SalesApiModule {
     this.cities = [];
     this.isRefreshing = false;
     this.initialized = false;
+    
+    // Add pagination styles
+    this.addPaginationStyles();
     
     // Store the instance
     salesApiInstance = this;
@@ -234,6 +237,211 @@ export default class SalesApiModule {
         syncStatusContainer.appendChild(forceSyncBtn);
       }
     }
+    
+    // Add data recovery section
+    this.setupRecoveryUI();
+  }
+  
+  /**
+   * Set up the data recovery UI
+   */
+  setupRecoveryUI() {
+    // Find the container for the recovery UI (below the sync status)
+    const container = document.querySelector('.sales-api-controls');
+    if (!container) return;
+    
+    // Check if the recovery section already exists
+    if (document.getElementById('recovery-section')) return;
+    
+    // Create the recovery section
+    const recoverySection = document.createElement('div');
+    recoverySection.id = 'recovery-section';
+    recoverySection.className = 'recovery-section';
+    recoverySection.style.marginTop = '20px';
+    recoverySection.style.padding = '15px';
+    recoverySection.style.backgroundColor = '#f5f5f5';
+    recoverySection.style.borderRadius = '5px';
+    recoverySection.style.border = '1px solid #ddd';
+    
+    // Add heading
+    const heading = document.createElement('h3');
+    heading.textContent = 'Data Recovery';
+    heading.style.marginTop = '0';
+    heading.style.marginBottom = '10px';
+    recoverySection.appendChild(heading);
+    
+    // Add description
+    const description = document.createElement('p');
+    description.textContent = 'Recover sales data from past days when the application was not running.';
+    description.style.marginBottom = '15px';
+    recoverySection.appendChild(description);
+    
+    // Create date inputs container
+    const dateContainer = document.createElement('div');
+    dateContainer.style.display = 'flex';
+    dateContainer.style.gap = '10px';
+    dateContainer.style.marginBottom = '15px';
+    dateContainer.style.alignItems = 'center';
+    
+    // From date
+    const fromDateLabel = document.createElement('label');
+    fromDateLabel.textContent = 'From:';
+    fromDateLabel.htmlFor = 'recovery-date-from';
+    fromDateLabel.style.marginRight = '5px';
+    dateContainer.appendChild(fromDateLabel);
+    
+    const fromDate = document.createElement('input');
+    fromDate.type = 'date';
+    fromDate.id = 'recovery-date-from';
+    fromDate.className = 'form-control';
+    
+    // Set default from date (30 days ago)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    fromDate.value = this.formatDateForInput(thirtyDaysAgo);
+    
+    dateContainer.appendChild(fromDate);
+    
+    // To date
+    const toDateLabel = document.createElement('label');
+    toDateLabel.textContent = 'To:';
+    toDateLabel.htmlFor = 'recovery-date-to';
+    toDateLabel.style.marginRight = '5px';
+    toDateLabel.style.marginLeft = '10px';
+    dateContainer.appendChild(toDateLabel);
+    
+    const toDate = document.createElement('input');
+    toDate.type = 'date';
+    toDate.id = 'recovery-date-to';
+    toDate.className = 'form-control';
+    
+    // Set default to date (yesterday)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    toDate.value = this.formatDateForInput(yesterday);
+    
+    dateContainer.appendChild(toDate);
+    
+    recoverySection.appendChild(dateContainer);
+    
+    // Add recovery button
+    const recoveryButton = document.createElement('button');
+    recoveryButton.id = 'start-recovery-btn';
+    recoveryButton.className = 'primary-btn';
+    recoveryButton.innerHTML = '<i class="fas fa-history"></i> Start Recovery';
+    recoveryButton.onclick = () => this.startRecovery();
+    
+    recoverySection.appendChild(recoveryButton);
+    
+    // Add recovery status
+    const recoveryStatus = document.createElement('div');
+    recoveryStatus.id = 'recovery-status';
+    recoveryStatus.className = 'recovery-status';
+    recoveryStatus.style.marginTop = '10px';
+    recoveryStatus.style.display = 'none';
+    recoverySection.appendChild(recoveryStatus);
+    
+    // Append the recovery section to the container
+    container.appendChild(recoverySection);
+  }
+  
+  /**
+   * Start the recovery process with the selected date range
+   */
+  async startRecovery() {
+    // Get the selected date range
+    const fromDateInput = document.getElementById('recovery-date-from');
+    const toDateInput = document.getElementById('recovery-date-to');
+    
+    if (!fromDateInput || !toDateInput) {
+      this.showNotification('Recovery date inputs not found', 'error');
+      return;
+    }
+    
+    const fromDate = fromDateInput.value;
+    const toDate = toDateInput.value;
+    
+    if (!fromDate || !toDate) {
+      this.showNotification('Please select both from and to dates', 'error');
+      return;
+    }
+    
+    // Validate date range
+    const fromDateObj = new Date(fromDate);
+    const toDateObj = new Date(toDate);
+    
+    // Set to beginning of day for accurate comparison
+    fromDateObj.setHours(0, 0, 0, 0);
+    toDateObj.setHours(0, 0, 0, 0);
+    
+    if (fromDateObj > toDateObj) {
+      this.showNotification('From date must be before to date', 'error');
+      return;
+    }
+    
+    // Update UI to show recovery is in progress
+    const recoveryButton = document.getElementById('start-recovery-btn');
+    if (recoveryButton) {
+      recoveryButton.disabled = true;
+      recoveryButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recovery in Progress...';
+    }
+    
+    const recoveryStatus = document.getElementById('recovery-status');
+    if (recoveryStatus) {
+      recoveryStatus.style.display = 'block';
+      recoveryStatus.innerHTML = '<p><i class="fas fa-info-circle"></i> Recovery in progress. This may take a while depending on the date range.</p>';
+    }
+    
+    try {
+      // Call the API to start recovery
+      const result = await window.api.manualSalesRecovery(fromDate, toDate);
+      
+      if (result.success) {
+        // Update UI with success message
+        if (recoveryStatus) {
+          let message = `<p><i class="fas fa-check-circle" style="color: green;"></i> Recovery completed successfully.</p>`;
+          message += `<p>Processed ${result.results.totalProcessed} contacts, created ${result.results.totalCreated} new contacts.</p>`;
+          
+          // Add city breakdown if available
+          if (result.results.byCity) {
+            message += '<ul style="margin-top: 5px; padding-left: 20px;">';
+            for (const city in result.results.byCity) {
+              const cityResult = result.results.byCity[city];
+              message += `<li>${city}: ${cityResult.created} new contacts from ${cityResult.processed} processed</li>`;
+            }
+            message += '</ul>';
+          }
+          
+          recoveryStatus.innerHTML = message;
+        }
+        
+        // Refresh the data table
+        await this.loadSalesContacts(true);
+        
+        this.showNotification('Recovery completed successfully', 'success');
+      } else {
+        // Show error message
+        if (recoveryStatus) {
+          recoveryStatus.innerHTML = `<p><i class="fas fa-exclamation-circle" style="color: red;"></i> Recovery failed: ${result.message || 'Unknown error'}</p>`;
+        }
+        this.showNotification(`Recovery failed: ${result.message || 'Unknown error'}`, 'error');
+      }
+    } catch (error) {
+      console.error('Error during recovery:', error);
+      
+      // Update UI with error message
+      if (recoveryStatus) {
+        recoveryStatus.innerHTML = `<p><i class="fas fa-exclamation-circle" style="color: red;"></i> Error during recovery: ${error.message || 'Unknown error'}</p>`;
+      }
+      
+      this.showNotification(`Error during recovery: ${error.message || 'Unknown error'}`, 'error');
+    } finally {
+      // Re-enable the recovery button
+      if (recoveryButton) {
+        recoveryButton.disabled = false;
+        recoveryButton.innerHTML = '<i class="fas fa-history"></i> Start Recovery';
+      }
+    }
   }
   
   /**
@@ -314,70 +522,100 @@ export default class SalesApiModule {
   }
   
   /**
-   * Load sales contacts from API
+   * Load sales contacts from the API
+   * @param {boolean} forceRefresh - Whether to force refresh even if already refreshing
    */
   async loadSalesContacts(forceRefresh = false) {
+    if (this.isRefreshing && !forceRefresh) {
+      console.log('Already refreshing, skipping...');
+      return;
+    }
+    
     try {
+      this.isRefreshing = true;
+      
+      // Show loading spinner
       this.showTableLoading();
       
-      if (forceRefresh) {
-        this.resetCountdown();
+      // Set default sort if not set
+      if (!this.filters.sortBy) {
+        this.filters.sortBy = 'documentDate';
+        this.filters.sortOrder = 'DESC';
       }
       
+      // Prepare options for API call
       const options = {
         page: this.pagination.page,
         limit: this.pagination.limit,
         city: this.filters.city,
         search: this.filters.search,
-        sortBy: this.filters.sortBy,
-        sortOrder: this.filters.sortOrder,
         startDate: this.filters.startDate,
-        endDate: this.filters.endDate
+        endDate: this.filters.endDate,
+        sortBy: this.filters.sortBy,
+        sortOrder: this.filters.sortOrder
       };
       
-      console.log('Loading sales contacts with options:', options);
-      const result = await window.api.getSalesContacts(options);
+      // Make API call
+      const response = await window.api.getSalesContacts(options);
       
-      if (result.error) {
-        throw new Error(result.error);
+      // Check for errors
+      if (response.error) {
+        throw new Error(response.error);
       }
       
-      console.log('Loaded sales contacts:', result);
-      this.contacts = result.data;
-      this.pagination = result.pagination;
+      // Update contacts and pagination
+      this.contacts = response.data;
+      this.pagination = response.pagination;
       
+      // Render contacts
       if (this.contacts.length === 0) {
         this.renderEmptyState();
       } else {
         this.renderSalesContacts(this.contacts);
       }
       
+      // Update pagination UI
       this.updatePagination();
-      this.updateSelectAllCheckbox();
-      this.updateDeleteSelectedButton();
+      
+      // Make sure sort UI is updated
+      this.updateSortUI();
+      
+      // Reset countdown if we had an auto-refresh
+      if (!forceRefresh) {
+        this.resetCountdown();
+      }
+      
+      // Log success
+      console.log(`Loaded ${this.contacts.length} sales contacts`);
+      
+      return true;
     } catch (error) {
       console.error('Error loading sales contacts:', error);
-      this.renderEmptyState('Error loading sales contacts: ' + error.message);
+      this.renderEmptyState(`Error loading contacts: ${error.message}`);
+      return false;
+    } finally {
+      this.isRefreshing = false;
     }
   }
   
   /**
-   * Show loading state in table
+   * Show loading indicator in the table
    */
   showTableLoading() {
-    const tbody = document.getElementById('sales-contacts-tbody');
-    if (tbody) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="9" class="loading-row">
-            <div class="loading-spinner">
-              <i class="fas fa-sync-alt fa-spin"></i>
-              <span>Loading contacts...</span>
-            </div>
-          </td>
-        </tr>
-      `;
-    }
+    const tableBody = document.getElementById('sales-contacts-tbody');
+    if (!tableBody) return;
+    
+    // Clear the table and show loading indicator
+    tableBody.innerHTML = `
+      <tr class="loading-row">
+        <td colspan="9" class="text-center">
+          <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading contacts...</p>
+          </div>
+        </td>
+      </tr>
+    `;
   }
   
   /**
@@ -385,64 +623,140 @@ export default class SalesApiModule {
    * @param {string} message - Message to display
    */
   renderEmptyState(message = 'No sales contacts found.') {
-    const tbody = document.getElementById('sales-contacts-tbody');
-    if (tbody) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="9" class="empty-state">
-            <i class="fas fa-info-circle"></i>
+    const tableBody = document.getElementById('sales-contacts-tbody');
+    if (!tableBody) return;
+    
+    tableBody.innerHTML = `
+      <tr class="empty-row">
+        <td colspan="9" class="text-center">
+          <div class="empty-state">
+            <i class="fas fa-inbox"></i>
             <p>${message}</p>
-          </td>
-        </tr>
-      `;
-    }
+          </div>
+        </td>
+      </tr>
+    `;
   }
   
   /**
-   * Render sales contacts in table
-   * @param {Array} contacts - Sales contacts to render
+   * Render sales contacts in the table
+   * @param {Array} contacts - Array of sales contacts to render
    */
   renderSalesContacts(contacts) {
-    const tbody = document.getElementById('sales-contacts-tbody');
-    if (!tbody) return;
+    const tableBody = document.getElementById('sales-contacts-tbody');
+    if (!tableBody) return;
     
-    console.log(`Rendering ${contacts.length} sales contacts`);
+    // Clear the table
+    tableBody.innerHTML = '';
     
-    tbody.innerHTML = '';
+    // Add the table header if not present
+    const tableHead = document.querySelector('#sales-contacts-table thead');
+    if (tableHead && tableHead.innerHTML === '') {
+      tableHead.innerHTML = `
+        <tr>
+          <th width="40">
+            <input type="checkbox" id="select-all-sales" title="Select All">
+          </th>
+          <th data-sort="name">Name <i class="fas fa-sort"></i></th>
+          <th data-sort="phoneNumber">Phone <i class="fas fa-sort"></i></th>
+          <th data-sort="code">Code <i class="fas fa-sort"></i></th>
+          <th data-sort="city">City <i class="fas fa-sort"></i></th>
+          <th data-sort="documentNumber">Document # <i class="fas fa-sort"></i></th>
+          <th data-sort="documentDate">Document Date <i class="fas fa-sort"></i></th>
+          <th data-sort="createdAt">Added On <i class="fas fa-sort"></i></th>
+          <th width="100">Actions</th>
+        </tr>
+      `;
+      
+      // Add sort event listeners
+      const sortHeaders = tableHead.querySelectorAll('th[data-sort]');
+      sortHeaders.forEach(header => {
+        header.addEventListener('click', () => {
+          this.handleSort(header.dataset.sort);
+        });
+      });
+      
+      // Add select all checkbox event listener
+      const selectAllCheckbox = document.getElementById('select-all-sales');
+      if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', () => {
+          this.toggleSelectAll();
+        });
+      }
+    }
     
+    // Update the sort UI
+    this.updateSortUI();
+    
+    // Add the contacts to the table
     contacts.forEach(contact => {
-      const tr = document.createElement('tr');
-      tr.dataset.id = contact.id;
+      const row = document.createElement('tr');
       
-      // Format dates for display
-      const documentDate = contact.documentDate ? formatDate(contact.documentDate) : '';
-      const createdAt = contact.createdAt ? formatDate(contact.createdAt) : '';
+      // Format document date
+      let documentDate = 'N/A';
+      if (contact.documentDate) {
+        documentDate = formatDate(new Date(contact.documentDate));
+      }
       
-      // Check if this contact is in the selected set
-      const isSelected = this.selectedContacts.has(contact.id);
+      // Format created date
+      let createdDate = 'N/A';
+      if (contact.createdAt) {
+        createdDate = formatDate(new Date(contact.createdAt));
+      }
       
-      tr.innerHTML = `
-        <td><input type="checkbox" class="select-contact" ${isSelected ? 'checked' : ''} data-id="${contact.id}"></td>
-        <td>${contact.name || ''}</td>
-        <td>${contact.phoneNumber || ''}</td>
-        <td>${contact.code || ''}</td>
-        <td>${contact.city || ''}</td>
-        <td>${contact.documentNumber || ''}</td>
+      row.innerHTML = `
+        <td>
+          <input type="checkbox" class="select-contact" data-id="${contact.id}" title="Select">
+        </td>
+        <td>${contact.name || 'N/A'}</td>
+        <td>${contact.phoneNumber || 'N/A'}</td>
+        <td>${contact.code || 'N/A'}</td>
+        <td>${contact.city || 'N/A'}</td>
+        <td>${contact.documentNumber || 'N/A'}</td>
         <td>${documentDate}</td>
-        <td>${createdAt}</td>
-        <td class="actions">
+        <td>${createdDate}</td>
+        <td>
           <button class="action-btn view-btn" data-id="${contact.id}" title="View Details">
             <i class="fas fa-eye"></i>
           </button>
         </td>
       `;
       
-      tbody.appendChild(tr);
+      // Check if contact is selected
+      if (this.selectedContacts.has(contact.id)) {
+        const checkbox = row.querySelector('.select-contact');
+        checkbox.checked = true;
+      }
+      
+      tableBody.appendChild(row);
     });
     
-    // Update the select all checkbox state after rendering
+    // Add event listeners to view buttons
+    const viewButtons = tableBody.querySelectorAll('.view-btn');
+    viewButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        this.viewContactDetails(button.dataset.id);
+      });
+    });
+    
+    // Add event listeners to select checkboxes
+    const selectCheckboxes = tableBody.querySelectorAll('.select-contact');
+    selectCheckboxes.forEach(checkbox => {
+      checkbox.addEventListener('change', () => {
+        if (checkbox.checked) {
+          this.selectedContacts.add(parseInt(checkbox.dataset.id));
+        } else {
+          this.selectedContacts.delete(parseInt(checkbox.dataset.id));
+        }
+        this.updateSelectAllCheckbox();
+        this.updateDeleteSelectedButton();
+      });
+    });
+    
+    // Update the select all checkbox
     this.updateSelectAllCheckbox();
-    // Update delete button state
+    
+    // Update the delete selected button
     this.updateDeleteSelectedButton();
   }
   
@@ -473,13 +787,24 @@ export default class SalesApiModule {
       this.handleCheckboxChange = (e) => {
         if (e.target.classList.contains('select-contact')) {
           const id = parseInt(e.target.dataset.id);
+          const isChecked = e.target.checked;
           
-          if (e.target.checked) {
+          if (isChecked) {
             this.selectedContacts.add(id);
             console.log(`Added contact ${id} to selection. Total: ${this.selectedContacts.size}`);
           } else {
             this.selectedContacts.delete(id);
             console.log(`Removed contact ${id} from selection. Total: ${this.selectedContacts.size}`);
+          }
+          
+          // Update row styling
+          const row = e.target.closest('tr');
+          if (row) {
+            if (isChecked) {
+              row.classList.add('selected');
+            } else {
+              row.classList.remove('selected');
+            }
           }
           
           this.updateSelectAllCheckbox();
@@ -527,60 +852,156 @@ export default class SalesApiModule {
     const paginationContainer = document.getElementById('sales-pagination');
     if (!paginationContainer) return;
     
-    if (this.pagination.pages <= 1) {
-      paginationContainer.innerHTML = '';
+    // Clear the container
+    paginationContainer.innerHTML = '';
+    
+    const { total, page, limit, pages } = this.pagination;
+    
+    // If no data or only one page, hide pagination
+    if (total === 0 || pages <= 1) {
+      paginationContainer.style.display = 'none';
       return;
     }
     
-    let paginationHTML = '<div class="pagination">';
+    // Show pagination container
+    paginationContainer.style.display = 'flex';
     
-    // Previous button
-    paginationHTML += `
-      <button ${this.pagination.page === 1 ? 'disabled' : ''} data-page="${this.pagination.page - 1}">
-        <i class="fas fa-chevron-left"></i>
-      </button>
-    `;
+    // Create pagination info
+    const paginationInfo = document.createElement('div');
+    paginationInfo.className = 'pagination-info';
+    paginationInfo.innerHTML = `Showing <span>${Math.min((page - 1) * limit + 1, total)}-${Math.min(page * limit, total)}</span> of <span>${total}</span> entries`;
+    paginationContainer.appendChild(paginationInfo);
     
-    // Page numbers
-    const startPage = Math.max(1, this.pagination.page - 2);
-    const endPage = Math.min(this.pagination.pages, startPage + 4);
+    // Create pagination controls
+    const paginationControls = document.createElement('div');
+    paginationControls.className = 'pagination';
     
-    for (let i = startPage; i <= endPage; i++) {
-      paginationHTML += `
-        <button ${i === this.pagination.page ? 'class="active" disabled' : ''} data-page="${i}">
-          ${i}
-        </button>
-      `;
-    }
+    // First page button
+    const firstPageBtn = document.createElement('button');
+    firstPageBtn.innerHTML = '<i class="fas fa-angle-double-left"></i>';
+    firstPageBtn.title = 'First Page';
+    firstPageBtn.disabled = page === 1;
+    firstPageBtn.addEventListener('click', () => {
+      if (page !== 1) {
+        this.pagination.page = 1;
+        this.loadSalesContacts();
+      }
+    });
+    paginationControls.appendChild(firstPageBtn);
     
-    // Next button
-    paginationHTML += `
-      <button ${this.pagination.page === this.pagination.pages ? 'disabled' : ''} data-page="${this.pagination.page + 1}">
-        <i class="fas fa-chevron-right"></i>
-      </button>
-    `;
+    // Previous page button
+    const prevPageBtn = document.createElement('button');
+    prevPageBtn.innerHTML = '<i class="fas fa-angle-left"></i>';
+    prevPageBtn.title = 'Previous Page';
+    prevPageBtn.disabled = page === 1;
+    prevPageBtn.addEventListener('click', () => {
+      if (page > 1) {
+        this.pagination.page = page - 1;
+        this.loadSalesContacts();
+      }
+    });
+    paginationControls.appendChild(prevPageBtn);
     
-    paginationHTML += '</div>';
+    // Page number buttons
+    const startPage = Math.max(1, page - 2);
+    const endPage = Math.min(pages, page + 2);
     
-    // Add pagination info
-    paginationHTML += `
-      <div class="pagination-info">
-        <span>Showing ${Math.min((this.pagination.page - 1) * this.pagination.limit + 1, this.pagination.total)} - 
-        ${Math.min(this.pagination.page * this.pagination.limit, this.pagination.total)} 
-        of ${this.pagination.total} contacts</span>
-      </div>
-    `;
-    
-    paginationContainer.innerHTML = paginationHTML;
-    
-    // Attach event listeners to pagination buttons
-    const paginationButtons = paginationContainer.querySelectorAll('button:not([disabled])');
-    paginationButtons.forEach(button => {
-      button.addEventListener('click', () => {
-        this.pagination.page = parseInt(button.dataset.page);
+    // Show ellipsis for first pages if needed
+    if (startPage > 1) {
+      const ellipsis = document.createElement('span');
+      ellipsis.textContent = '...';
+      
+      // Add page 1 button before ellipsis
+      const firstBtn = document.createElement('button');
+      firstBtn.textContent = '1';
+      firstBtn.addEventListener('click', () => {
+        this.pagination.page = 1;
         this.loadSalesContacts();
       });
+      paginationControls.appendChild(firstBtn);
+      
+      paginationControls.appendChild(ellipsis);
+    }
+    
+    // Page number buttons
+    for (let i = startPage; i <= endPage; i++) {
+      const pageBtn = document.createElement('button');
+      pageBtn.textContent = i;
+      pageBtn.className = i === page ? 'active' : '';
+      pageBtn.addEventListener('click', () => {
+        if (i !== page) {
+          this.pagination.page = i;
+          this.loadSalesContacts();
+        }
+      });
+      paginationControls.appendChild(pageBtn);
+    }
+    
+    // Show ellipsis for last pages if needed
+    if (endPage < pages) {
+      const ellipsis = document.createElement('span');
+      ellipsis.textContent = '...';
+      paginationControls.appendChild(ellipsis);
+      
+      // Add last page button after ellipsis
+      const lastBtn = document.createElement('button');
+      lastBtn.textContent = pages;
+      lastBtn.addEventListener('click', () => {
+        this.pagination.page = pages;
+        this.loadSalesContacts();
+      });
+      paginationControls.appendChild(lastBtn);
+    }
+    
+    // Next page button
+    const nextPageBtn = document.createElement('button');
+    nextPageBtn.innerHTML = '<i class="fas fa-angle-right"></i>';
+    nextPageBtn.title = 'Next Page';
+    nextPageBtn.disabled = page === pages;
+    nextPageBtn.addEventListener('click', () => {
+      if (page < pages) {
+        this.pagination.page = page + 1;
+        this.loadSalesContacts();
+      }
     });
+    paginationControls.appendChild(nextPageBtn);
+    
+    // Last page button
+    const lastPageBtn = document.createElement('button');
+    lastPageBtn.innerHTML = '<i class="fas fa-angle-double-right"></i>';
+    lastPageBtn.title = 'Last Page';
+    lastPageBtn.disabled = page === pages;
+    lastPageBtn.addEventListener('click', () => {
+      if (page !== pages) {
+        this.pagination.page = pages;
+        this.loadSalesContacts();
+      }
+    });
+    paginationControls.appendChild(lastPageBtn);
+    
+    // Add page size selector
+    const pageSizeSelector = document.createElement('select');
+    pageSizeSelector.className = 'page-size-selector';
+    pageSizeSelector.title = 'Items per page';
+    pageSizeSelector.style.marginLeft = '10px';
+    
+    [10, 20, 50, 100].forEach(size => {
+      const option = document.createElement('option');
+      option.value = size;
+      option.textContent = `${size} items`;
+      option.selected = size === this.pagination.limit;
+      pageSizeSelector.appendChild(option);
+    });
+    
+    pageSizeSelector.addEventListener('change', () => {
+      this.pagination.limit = parseInt(pageSizeSelector.value);
+      this.pagination.page = 1; // Reset to first page
+      this.loadSalesContacts();
+    });
+    
+    paginationControls.appendChild(pageSizeSelector);
+    
+    paginationContainer.appendChild(paginationControls);
   }
   
   /**
@@ -588,16 +1009,21 @@ export default class SalesApiModule {
    * @param {string} column - Column to sort by
    */
   handleSort(column) {
+    console.log(`Sorting by ${column}`);
+    
+    // If clicking the same column, toggle the sort order
     if (this.filters.sortBy === column) {
-      // Toggle sort order
       this.filters.sortOrder = this.filters.sortOrder === 'ASC' ? 'DESC' : 'ASC';
     } else {
-      // New column, default to descending
+      // If clicking a different column, set it as the sort column with default DESC order
       this.filters.sortBy = column;
-      this.filters.sortOrder = 'DESC';
+      this.filters.sortOrder = 'DESC'; // Default to descending
     }
     
-    // Update UI to show sort direction
+    // Reset to first page when changing sort
+    this.pagination.page = 1;
+    
+    // Update UI to reflect the new sort
     this.updateSortUI();
     
     // Reload data with new sort
@@ -605,20 +1031,34 @@ export default class SalesApiModule {
   }
   
   /**
-   * Update the sort UI to show current sort column and direction
+   * Update the sort UI to indicate the current sort column and direction
    */
   updateSortUI() {
-    // Remove sorting classes from all headers
+    // Find all sort headers
     const headers = document.querySelectorAll('#sales-contacts-table th[data-sort]');
+    
+    // Remove all sort classes
     headers.forEach(header => {
-      header.classList.remove('sorted-asc', 'sorted-desc');
+      header.classList.remove('sort-asc', 'sort-desc', 'sort-active');
+      
+      // Reset any modified icons back to fa-sort
+      const icon = header.querySelector('i');
+      if (icon) {
+        icon.className = 'fas fa-sort';
+      }
     });
     
-    // Add sorting class to active header
-    const activeHeader = document.querySelector(`#sales-contacts-table th[data-sort="${this.filters.sortBy}"]`);
-    if (activeHeader) {
-      const sortClass = this.filters.sortOrder === 'ASC' ? 'sorted-asc' : 'sorted-desc';
-      activeHeader.classList.add(sortClass);
+    // Add the appropriate class to the current sort column
+    const currentSortHeader = document.querySelector(`#sales-contacts-table th[data-sort="${this.filters.sortBy}"]`);
+    if (currentSortHeader) {
+      currentSortHeader.classList.add(this.filters.sortOrder === 'ASC' ? 'sort-asc' : 'sort-desc');
+      currentSortHeader.classList.add('sort-active');
+      
+      // Update the icon to show sort direction
+      const icon = currentSortHeader.querySelector('i');
+      if (icon) {
+        icon.className = `fas ${this.filters.sortOrder === 'ASC' ? 'fa-sort-up' : 'fa-sort-down'}`;
+      }
     }
   }
   
@@ -626,7 +1066,7 @@ export default class SalesApiModule {
    * Toggle select all checkboxes
    */
   toggleSelectAll() {
-    const selectAllCheckbox = document.getElementById('select-all-sales-contacts');
+    const selectAllCheckbox = document.getElementById('select-all-sales');
     if (!selectAllCheckbox) return;
     
     console.log('Toggle select all, checked:', selectAllCheckbox.checked);
@@ -648,6 +1088,16 @@ export default class SalesApiModule {
       const id = parseInt(checkbox.dataset.id);
       if (isChecked) {
         this.selectedContacts.add(id);
+      }
+      
+      // Update row styling
+      const row = checkbox.closest('tr');
+      if (row) {
+        if (isChecked) {
+          row.classList.add('selected');
+        } else {
+          row.classList.remove('selected');
+        }
       }
     });
     
@@ -1328,5 +1778,144 @@ export default class SalesApiModule {
         forceSyncBtn.innerHTML = '<i class="fas fa-sync"></i> Force Sync';
       }
     }
+  }
+  
+  /**
+   * Add CSS styles for the enhanced pagination and sorting
+   */
+  addPaginationStyles() {
+    // Check if styles already exist
+    if (document.getElementById('sales-pagination-styles')) return;
+    
+    const styleElement = document.createElement('style');
+    styleElement.id = 'sales-pagination-styles';
+    styleElement.textContent = `
+      #sales-pagination {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 20px;
+        padding: 10px 0;
+      }
+      
+      .pagination-info {
+        font-size: 14px;
+        color: #666;
+      }
+      
+      .pagination-info span {
+        font-weight: 600;
+        color: #333;
+      }
+      
+      .pagination {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+      }
+      
+      .pagination button {
+        min-width: 32px;
+        height: 32px;
+        background-color: #f5f5f5;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+      }
+      
+      .pagination button:hover:not(:disabled) {
+        background-color: #e0e0e0;
+        border-color: #ccc;
+      }
+      
+      .pagination button.active {
+        background-color: #4a90e2;
+        border-color: #4a90e2;
+        color: white;
+        font-weight: 600;
+      }
+      
+      .pagination button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      
+      .pagination span {
+        color: #666;
+        margin: 0 2px;
+      }
+      
+      .page-size-selector {
+        height: 32px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background-color: #f5f5f5;
+        padding: 0 8px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      
+      /* Enhanced styles for sortable table headers */
+      #sales-contacts-table th[data-sort] {
+        cursor: pointer;
+        position: relative;
+        padding-right: 25px;
+        transition: background-color 0.2s;
+      }
+      
+      #sales-contacts-table th[data-sort]:hover {
+        background-color: #f0f0f0;
+      }
+      
+      #sales-contacts-table th[data-sort] i {
+        position: absolute;
+        right: 8px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #aaa;
+        font-size: 12px;
+      }
+      
+      /* Active sort column styling */
+      #sales-contacts-table th.sort-active {
+        background-color: #f0f7ff;
+        border-bottom: 2px solid #4a90e2;
+        color: #1a73e8;
+        font-weight: 600;
+      }
+      
+      #sales-contacts-table th.sort-active i {
+        color: #1a73e8;
+        font-size: 14px;
+      }
+      
+      /* Sort direction indicators */
+      #sales-contacts-table th.sort-asc i.fa-sort-up,
+      #sales-contacts-table th.sort-desc i.fa-sort-down {
+        color: #1a73e8;
+      }
+      
+      /* Row hover effect */
+      #sales-contacts-table tbody tr:hover {
+        background-color: #f5f9ff;
+      }
+      
+      /* Alternating row colors for better readability */
+      #sales-contacts-table tbody tr:nth-child(even) {
+        background-color: #fafafa;
+      }
+      
+      /* Selection styling */
+      #sales-contacts-table tbody tr.selected {
+        background-color: #e8f0fe;
+      }
+    `;
+    
+    document.head.appendChild(styleElement);
   }
 } 

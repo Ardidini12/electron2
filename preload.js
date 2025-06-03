@@ -62,6 +62,10 @@ function exposeAPI() {
       setAutoConnectWhatsApp: (enabled) => ipcRenderer.invoke('set-auto-connect-whatsapp', enabled),
       getAutoConnectWhatsApp: () => ipcRenderer.invoke('get-auto-connect-whatsapp'),
       checkWhatsAppRequirements: () => ipcRenderer.invoke('check-whatsapp-requirements'),
+      resetWhatsAppSession: () => ipcRenderer.invoke('reset-whatsapp-session'),
+      repairWhatsAppConnection: () => ipcRenderer.invoke('repair-whatsapp-connection'),
+      getWhatsAppDiagnostics: () => ipcRenderer.invoke('get-whatsapp-diagnostics'),
+      restartWhatsAppService: () => ipcRenderer.invoke('restart-whatsapp-service'),
       
       // Sales API operations
       getSalesContacts: (options) => ipcRenderer.invoke('get-sales-contacts', options),
@@ -71,6 +75,7 @@ function exposeAPI() {
       deleteSalesContacts: (ids) => ipcRenderer.invoke('delete-sales-contacts', ids),
       deleteAllSalesContacts: () => ipcRenderer.invoke('delete-all-sales-contacts'),
       getAvailableCities: () => ipcRenderer.invoke('get-available-cities'),
+      manualSalesRecovery: (startDate, endDate) => ipcRenderer.invoke('manual-sales-recovery', startDate, endDate),
       
       // Message operations
       getScheduledMessages: (status) => ipcRenderer.invoke('get-scheduled-messages', status),
@@ -105,6 +110,8 @@ function exposeAPI() {
           'whatsapp-disconnected',
           'whatsapp-info', 
           'whatsapp-session-check',
+          'whatsapp-error',
+          'whatsapp-suggestions',
           'message-sent', 
           'message-error', 
           'message-status-update',
@@ -131,6 +138,8 @@ function exposeAPI() {
           'whatsapp-disconnected',
           'whatsapp-info', 
           'whatsapp-session-check',
+          'whatsapp-error',
+          'whatsapp-suggestions',
           'message-sent', 
           'message-error', 
           'message-status-update',

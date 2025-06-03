@@ -12,6 +12,7 @@ const CREDENTIALS = {
 };
 const CITIES = ['tirane', 'vlore', 'fier'];
 const REFRESH_INTERVAL = 2 * 60 * 1000; // 2 minutes
+const RECOVERY_DAYS = 30; // Number of days to look back for recovery
 
 class SalesApiController {
   constructor() {
@@ -28,6 +29,7 @@ class SalesApiController {
       fier: { lastSync: null, count: 0 }
     };
     this.processedIds = {};
+    this.isRecoveryRunning = false;
     
     console.log('SalesApiController initialized, isRunning:', this.isRunning);
   }
@@ -144,6 +146,7 @@ class SalesApiController {
         const businessEntity = contact.businessEntity || {};
         const phoneNumber = businessEntity.phone || '';
         const contactId = contact.id;
+        const documentNumber = contact.documentNumber || '';
         
         // Skip records without a valid phone number
         if (!phoneNumber || !phoneNumber.match(/^\+?[1-9]\d{1,14}$/)) {
@@ -157,16 +160,31 @@ class SalesApiController {
           continue;
         }
 
-        // Check if this contact ID already exists in the database
-        // We're using toString() to ensure consistent comparison with the database
-        const existingContact = await SalesContact.findOne({
+        // Enhanced duplicate detection: check by contact ID or document number
+        const existingByContactId = await SalesContact.findOne({
           where: { contactId: contactId.toString() }
         });
 
-        if (existingContact) {
+        // Also check for duplicates by document number if it's provided
+        let existingByDocNumber = null;
+        if (documentNumber) {
+          existingByDocNumber = await SalesContact.findOne({
+            where: { 
+              documentNumber: documentNumber,
+              city: city
+            }
+          });
+        }
+
+        // If a duplicate is found by either method, skip this contact
+        if (existingByContactId || existingByDocNumber) {
           // Add to processed IDs to prevent checking again this session
           this.processedIds[dateKey][city].add(contactId);
           results.duplicates++;
+          
+          // Log detail about the duplicate
+          const dupSource = existingByContactId ? 'contactId' : 'documentNumber';
+          console.log(`Duplicate ${dupSource} found for contact ${contactId} with document number ${documentNumber}`);
           continue;
         }
         
@@ -180,7 +198,7 @@ class SalesApiController {
           phoneNumber: phoneNumber,
           code: businessEntity.code || '',
           city: city,
-          documentNumber: contact.documentNumber || '',
+          documentNumber: documentNumber,
           documentDate: contact.documentDate ? new Date(contact.documentDate) : null,
           shopId: businessEntity.shopId ? businessEntity.shopId.toString() : '',
           sourceData: JSON.stringify(contact)
@@ -268,7 +286,10 @@ class SalesApiController {
     
     console.log('Starting periodic sync process...');
     
-    // Start immediately
+    // First, try to recover any missed days
+    this.recoverMissedDays();
+    
+    // Start immediate sync for today
     this.startSyncProcess();
     
     // Set up interval
@@ -298,7 +319,7 @@ class SalesApiController {
         limit = 20,
         city = null,
         search = null,
-        sortBy = 'createdAt',
+        sortBy = 'documentDate',
         sortOrder = 'DESC',
         startDate = null,
         endDate = null
@@ -461,7 +482,8 @@ class SalesApiController {
       nextSync: this.nextSyncDate,
       syncStatus: this.syncStatus,
       summary,
-      isAuthenticated: this.isTokenValid()
+      isAuthenticated: this.isTokenValid(),
+      isRecoveryRunning: this.isRecoveryRunning
     };
     
     console.log('Getting sync status:', status.isRunning);
@@ -471,6 +493,244 @@ class SalesApiController {
   // Get available cities for filtering
   getAvailableCities() {
     return CITIES;
+  }
+
+  /**
+   * Recover sales contacts for missed days
+   * This function will fetch data for a specified number of past days
+   * to ensure we don't miss any sales contacts when the app wasn't running
+   */
+  async recoverMissedDays() {
+    if (this.isRecoveryRunning) {
+      console.log('Recovery process already running');
+      return;
+    }
+
+    console.log(`Starting recovery process for the last ${RECOVERY_DAYS} days...`);
+    this.isRecoveryRunning = true;
+
+    try {
+      // Get the date range to recover
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // Get the most recent dates for each city where we have data
+      const mostRecentDates = {};
+      for (const city of CITIES) {
+        const mostRecent = await SalesContact.findOne({
+          where: { city },
+          order: [['documentDate', 'DESC']],
+          attributes: ['documentDate'],
+          raw: true
+        });
+        
+        if (mostRecent && mostRecent.documentDate) {
+          // Start from the most recent date (inclusive)
+          // Note: We're not adding +1 day to include the date itself
+          const lastDate = new Date(mostRecent.documentDate);
+          mostRecentDates[city] = lastDate;
+        } else {
+          // If no data, go back the full recovery period
+          const startDate = new Date(today);
+          startDate.setDate(startDate.getDate() - RECOVERY_DAYS);
+          mostRecentDates[city] = startDate;
+        }
+      }
+      
+      // Get a list of dates to check for each city
+      const datesToCheck = {};
+      for (const city of CITIES) {
+        datesToCheck[city] = [];
+        const startDate = mostRecentDates[city];
+        
+        // Add all dates from start date (inclusive) until yesterday (inclusive)
+        const currentDate = new Date(startDate);
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        // Set time to beginning of the day for accurate comparison
+        currentDate.setHours(0, 0, 0, 0);
+        
+        // Include all days from start date through yesterday
+        while (currentDate <= yesterday) {
+          datesToCheck[city].push(new Date(currentDate));
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      }
+      
+      // Log the recovery plan
+      for (const city of CITIES) {
+        const dateCount = datesToCheck[city].length;
+        if (dateCount > 0) {
+          const startDate = datesToCheck[city][0];
+          const endDate = datesToCheck[city][dateCount - 1];
+          console.log(`Recovery plan for ${city}: ${dateCount} days from ${this.formatDate(startDate)} to ${this.formatDate(endDate)}`);
+        } else {
+          console.log(`No recovery needed for ${city}, already up to date`);
+        }
+      }
+      
+      // Process each city and date, going from oldest to newest
+      for (const city of CITIES) {
+        const dates = datesToCheck[city];
+        if (dates.length === 0) continue;
+        
+        console.log(`Starting recovery for ${city} with ${dates.length} dates to process`);
+        
+        // Process from oldest to newest
+        for (const date of dates) {
+          // Check if we should continue (in case app is shutting down)
+          if (!this.isRecoveryRunning) {
+            console.log('Recovery process was stopped');
+            return;
+          }
+          
+          console.log(`Recovering data for ${city} on ${this.formatDate(date)}...`);
+          
+          // Fetch and process contacts for this date
+          const cityData = await this.fetchSalesContacts(city, date);
+          const results = await this.processSalesContacts(cityData);
+          
+          console.log(`Recovery for ${city} on ${this.formatDate(date)}: created ${results.created} contacts`);
+          
+          // Small delay to avoid API rate limiting
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      
+      console.log('Recovery process completed successfully');
+    } catch (error) {
+      console.error('Error in recovery process:', error.message);
+    } finally {
+      this.isRecoveryRunning = false;
+    }
+  }
+
+  /**
+   * Manually trigger recovery process for a specific date range
+   * @param {Date} startDate - Start date for recovery
+   * @param {Date} endDate - End date for recovery (defaults to yesterday)
+   */
+  async manualRecovery(startDate, endDate = null) {
+    if (this.isRecoveryRunning) {
+      return { 
+        success: false, 
+        message: 'Recovery process already running' 
+      };
+    }
+
+    try {
+      // Validate dates
+      if (!startDate) {
+        return { 
+          success: false, 
+          message: 'Start date is required' 
+        };
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      // If no end date specified, use yesterday
+      if (!endDate) {
+        endDate = new Date(today);
+        endDate.setDate(endDate.getDate() - 1);
+      }
+      
+      // Convert to Date objects if they're strings
+      if (typeof startDate === 'string') startDate = new Date(startDate);
+      if (typeof endDate === 'string') endDate = new Date(endDate);
+      
+      // Ensure dates are set to start of day for accurate comparison
+      startDate.setHours(0, 0, 0, 0);
+      endDate.setHours(0, 0, 0, 0);
+      
+      // Validate date range
+      if (startDate > endDate) {
+        return { 
+          success: false, 
+          message: 'Start date must be before end date' 
+        };
+      }
+      
+      if (endDate >= today) {
+        endDate = new Date(today);
+        endDate.setDate(endDate.getDate() - 1);
+        endDate.setHours(0, 0, 0, 0);
+      }
+      
+      console.log(`Starting manual recovery from ${this.formatDate(startDate)} to ${this.formatDate(endDate)}...`);
+      this.isRecoveryRunning = true;
+      
+      // Prepare dates to check for each city
+      const datesToCheck = {};
+      for (const city of CITIES) {
+        datesToCheck[city] = [];
+        const currentDate = new Date(startDate);
+        
+        // Include all days from start date through end date (inclusive)
+        while (currentDate <= endDate) {
+          datesToCheck[city].push(new Date(currentDate));
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+      }
+      
+      // Process each city and date
+      const results = {
+        totalProcessed: 0,
+        totalCreated: 0,
+        byCity: {}
+      };
+      
+      for (const city of CITIES) {
+        results.byCity[city] = {
+          processed: 0,
+          created: 0
+        };
+        
+        const dates = datesToCheck[city];
+        for (const date of dates) {
+          // Check if we should continue
+          if (!this.isRecoveryRunning) {
+            console.log('Manual recovery process was stopped');
+            return {
+              success: false,
+              message: 'Recovery process was stopped',
+              results
+            };
+          }
+          
+          // Fetch and process contacts for this date
+          const cityData = await this.fetchSalesContacts(city, date);
+          const dateResults = await this.processSalesContacts(cityData);
+          
+          results.totalProcessed += dateResults.total;
+          results.totalCreated += dateResults.created;
+          results.byCity[city].processed += dateResults.total;
+          results.byCity[city].created += dateResults.created;
+          
+          // Small delay to avoid API rate limiting
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
+      
+      console.log('Manual recovery process completed successfully');
+      console.log(`Processed ${results.totalProcessed} contacts, created ${results.totalCreated} new contacts`);
+      
+      return {
+        success: true,
+        message: 'Recovery completed successfully',
+        results
+      };
+    } catch (error) {
+      console.error('Error in manual recovery process:', error.message);
+      return {
+        success: false,
+        message: `Error during recovery: ${error.message}`
+      };
+    } finally {
+      this.isRecoveryRunning = false;
+    }
   }
 }
 

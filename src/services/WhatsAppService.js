@@ -68,12 +68,23 @@ class WhatsAppService extends EventEmitter {
         console.error('Error during client cleanup:', cleanupError);
       }
       
+      // Try to kill any hanging browser processes
+      try {
+        this.killOldBrowserProcesses();
+      } catch (killError) {
+        console.error('Error killing old browser processes:', killError);
+      }
+      
       console.log('[WA DEBUG] Setting up WhatsApp event listeners');
       
-      // Configure Puppeteer options
-      let LATEST_WEB_VERSION = '2.2314.7';
+      // Configure WhatsApp Web version
+      let LATEST_WEB_VERSION = '2.2401.6';
       
-      // Configure Puppeteer options
+      // Detect available Chrome installation
+      const chromePath = await this.findChromePath();
+      console.log(`Using Chrome path: ${chromePath || 'System default'}`);
+      
+      // Configure Puppeteer options with improved browser launch settings
       const puppeteerOpts = {
         headless: true,
         args: [
@@ -87,11 +98,15 @@ class WhatsAppService extends EventEmitter {
           '--deterministic-fetch',
           '--disable-features=site-per-process',
           '--disable-extensions',
-          '--disable-notifications'
+          '--disable-notifications',
+          '--disable-web-security',
+          '--ignore-certificate-errors',
+          '--allow-running-insecure-content',
+          '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         ],
-        executablePath: process.platform === 'win32' 
-          ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' 
-          : undefined
+        executablePath: chromePath,
+        timeout: 120000, // Increase timeout to 2 minutes
+        ignoreHTTPSErrors: true
       };
       
       // Create client with updated configuration
@@ -101,7 +116,7 @@ class WhatsAppService extends EventEmitter {
           clientId: 'bss-sender'
         }),
         puppeteer: puppeteerOpts,
-        authTimeoutMs: 120000,
+        authTimeoutMs: 180000, // Increased timeout (3 minutes)
         qrTimeoutMs: 0, // QR never times out
         webVersion: LATEST_WEB_VERSION,
         webVersionCache: { type: 'local', path: this.sessionPath },
@@ -157,18 +172,125 @@ class WhatsAppService extends EventEmitter {
         this.emit('state_change', state);
       });
       this.startConnectionMonitoring();
-      const initPromise = this.client.initialize();
+      
+      // Add a custom error handler for better diagnostics
+      process.on('unhandledRejection', (reason, promise) => {
+        console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        // Don't exit the app, just log the error
+      });
+      
+      // Set up initialization with proper error handling
+      let initPromise;
+      
+      // Try main initialization
+      try {
+        console.log('Starting WhatsApp client initialization...');
+        initPromise = this.client.initialize();
+      } catch (initError) {
+        console.error('Initial initialization attempt failed:', initError);
+        
+        // Try a fallback approach with more relaxed settings if this is a browser launch error
+        if (initError.message && initError.message.includes('Failed to launch')) {
+          console.log('Browser launch failed, attempting with fallback options...');
+          
+          // Try a different browser initialization approach
+          try {
+            // Clean up old client
+            if (this.client) {
+              try {
+                await this.client.destroy();
+              } catch (e) {
+                console.log('Error destroying client during fallback:', e.message);
+              }
+            }
+            
+            // Create new client with more permissive options
+            const fallbackOptions = {
+              headless: true,
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-web-security'
+              ],
+              // Use system default Chrome
+              executablePath: undefined
+            };
+            
+            console.log('Creating new client with fallback options');
+            this.client = new Client({
+              authStrategy: new LocalAuth({
+                dataPath: this.sessionPath,
+                clientId: 'bss-sender'
+              }),
+              puppeteer: fallbackOptions,
+              authTimeoutMs: 180000,
+              qrTimeoutMs: 0,
+              webVersion: LATEST_WEB_VERSION,
+              restartOnAuthFail: true
+            });
+            
+            // Set up events again
+            this.setupEventListeners();
+            
+            // Try initialization with fallback options
+            console.log('Attempting initialization with fallback options');
+            initPromise = this.client.initialize();
+          } catch (fallbackError) {
+            console.error('Fallback initialization also failed:', fallbackError);
+            throw fallbackError;
+          }
+        } else {
+          // Not a browser launch error, rethrow
+          throw initError;
+        }
+      }
+      
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Initialization timed out after 3 minutes')), 180000);
       });
+      
       await Promise.race([initPromise, timeoutPromise]);
       this.setupEventListeners();
       return { success: true };
     } catch (error) {
       this.status.isConnected = false;
       this.status.status = 'disconnected';
+      this.status.lastError = error.message;
+      
+      // Enhanced error logging
       console.error('[WA ERROR] Error initializing WhatsApp:', error);
-      return { success: false, error: error.message };
+      
+      // Diagnostic information
+      try {
+        const diagnostics = await this.checkSystemRequirements();
+        console.log('System diagnostics:', diagnostics);
+        
+        // If there are issues, log them as warnings
+        if (diagnostics.issues.length > 0) {
+          console.warn('System issues that may affect WhatsApp connection:');
+          diagnostics.issues.forEach((issue, i) => {
+            console.warn(`  ${i+1}. ${issue}`);
+          });
+          
+          // Also log suggestions
+          if (diagnostics.suggestions.length > 0) {
+            console.warn('Suggestions to fix WhatsApp connection issues:');
+            diagnostics.suggestions.forEach((suggestion, i) => {
+              console.warn(`  ${i+1}. ${suggestion}`);
+            });
+          }
+        }
+      } catch (diagError) {
+        console.error('Error collecting system diagnostics:', diagError);
+      }
+      
+      return { 
+        success: false, 
+        error: error.message,
+        suggestions: await this.getSuggestionForError(error)
+      };
     } finally {
       this.initInProgress = false;
     }
@@ -996,75 +1118,120 @@ class WhatsAppService extends EventEmitter {
     }
     
     try {
+      // First, attempt to close any existing client properly
+      if (this.client) {
+        try {
+          console.log('Attempting to destroy existing client...');
+          await this.client.destroy();
+          this.client = null;
+          console.log('Successfully destroyed client');
+          
+          // Give some time for file handles to be released
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        } catch (e) {
+          console.log('Error destroying client:', e.message);
+        }
+      }
+      
       // Look for lock files in the session directory
       const lockFiles = [
         'SingletonLock',
         'SingletonCookie',
         'SingletonSocket',
         '.lock',
-        'lockfile'
+        'lockfile',
+        'LOCK',
+        'CHROME_CRASHPAD_*',
+        '*.tmp',
+        'Crashpad',
+        'CrashpadMetrics*.pma'
       ];
       
-      // Check in main session directory
-      for (const lockFile of lockFiles) {
-        const lockPath = path.join(this.sessionPath, lockFile);
-        if (fs.existsSync(lockPath)) {
-          try {
-            fs.unlinkSync(lockPath);
-            console.log(`Removed lock file: ${lockPath}`);
-        } catch (e) {
-            console.error(`Failed to remove lock file ${lockPath}:`, e);
-          }
-        }
-      }
-      
-      // Check in Default directory if it exists
-      const defaultDir = path.join(this.sessionPath, 'Default');
-      if (fs.existsSync(defaultDir)) {
-        for (const lockFile of lockFiles) {
-          const lockPath = path.join(defaultDir, lockFile);
-          if (fs.existsSync(lockPath)) {
-            try {
-              fs.unlinkSync(lockPath);
-              console.log(`Removed lock file: ${lockPath}`);
+      // More thorough cleanup function that handles wildcards
+      const cleanupDirectory = (dirPath) => {
+        if (!fs.existsSync(dirPath)) return;
+        
+        const entries = fs.readdirSync(dirPath);
+        
+        // Process each lock file pattern
+        for (const lockPattern of lockFiles) {
+          // If it contains a wildcard
+          if (lockPattern.includes('*')) {
+            const regex = new RegExp('^' + lockPattern.replace(/\*/g, '.*') + '$');
+            
+            // Filter files matching the pattern
+            const matchingFiles = entries.filter(entry => regex.test(entry));
+            
+            // Delete matching files
+            for (const file of matchingFiles) {
+              const filePath = path.join(dirPath, file);
+              try {
+                const stats = fs.statSync(filePath);
+                if (stats.isFile()) {
+                  fs.unlinkSync(filePath);
+                  console.log(`Removed lock file: ${filePath}`);
+                } else if (stats.isDirectory()) {
+                  // Recursively remove directories if needed
+                  fs.rmdirSync(filePath, { recursive: true });
+                  console.log(`Removed lock directory: ${filePath}`);
+                }
               } catch (e) {
-              console.error(`Failed to remove lock file ${lockPath}:`, e);
+                console.error(`Failed to remove ${filePath}:`, e);
+              }
+            }
+          } else {
+            // Direct file check without wildcard
+            const lockPath = path.join(dirPath, lockPattern);
+            if (fs.existsSync(lockPath)) {
+              try {
+                const stats = fs.statSync(lockPath);
+                if (stats.isFile()) {
+                  fs.unlinkSync(lockPath);
+                  console.log(`Removed lock file: ${lockPath}`);
+                } else if (stats.isDirectory()) {
+                  fs.rmdirSync(lockPath, { recursive: true });
+                  console.log(`Removed lock directory: ${lockPath}`);
+                }
+              } catch (e) {
+                console.error(`Failed to remove ${lockPath}:`, e);
+              }
             }
           }
         }
-      }
+      };
+      
+      // Clean main session directory
+      cleanupDirectory(this.sessionPath);
+      
+      // Clean Default directory if it exists
+      const defaultDir = path.join(this.sessionPath, 'Default');
+      cleanupDirectory(defaultDir);
+      
+      // Clean Default/Network directory if it exists
+      const networkDir = path.join(defaultDir, 'Network');
+      cleanupDirectory(networkDir);
       
       // Delete any WebSocket tmp files
       const wsRegex = /\.websocket$/;
-      const safeDeleteFile = (filePath) => {
-        try {
-          if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-                  }
-                } catch (e) {
-          console.error(`Failed to delete file ${filePath}:`, e);
-        }
-      };
-      
-      const checkAndCleanDir = (dirPath) => {
+      const checkAndCleanWebSockets = (dirPath) => {
         if (fs.existsSync(dirPath)) {
           fs.readdirSync(dirPath).forEach(file => {
             if (wsRegex.test(file)) {
-              safeDeleteFile(path.join(dirPath, file));
+              try {
+                fs.unlinkSync(path.join(dirPath, file));
+                console.log(`Removed WebSocket file: ${path.join(dirPath, file)}`);
+              } catch (e) {
+                console.error(`Failed to delete WebSocket file:`, e);
+              }
             }
           });
         }
       };
       
-      // Check main session directory for websocket files
-      checkAndCleanDir(this.sessionPath);
-      
-      // Check Default directory for websocket files
-      checkAndCleanDir(defaultDir);
-      
-      // Check Default/Network directory for websocket files
-      const networkDir = path.join(defaultDir, 'Network');
-      checkAndCleanDir(networkDir);
+      // Check multiple directories for WebSocket files
+      checkAndCleanWebSockets(this.sessionPath);
+      checkAndCleanWebSockets(defaultDir);
+      checkAndCleanWebSockets(networkDir);
       
       console.log('Browser session cleanup complete');
     } catch (error) {
@@ -1077,8 +1244,59 @@ class WhatsAppService extends EventEmitter {
    */
   killOldBrowserProcesses() {
     try {
-      // This is a no-op on Electron renderer process, but can be implemented in main process
-      console.log('Cleaning up old browser processes if needed');
+      console.log('Cleaning up old browser processes...');
+      
+      // If we're on Windows, use taskkill to clean up processes
+      if (process.platform === 'win32') {
+        try {
+          const { execSync } = require('child_process');
+          
+          // Try to kill any orphaned Chrome processes
+          // /F = force, /T = terminate child processes too
+          console.log('Attempting to kill orphaned Chrome processes...');
+          const chromeKillCommands = [
+            'taskkill /F /IM chrome.exe /T',
+            'taskkill /F /IM msedge.exe /T',
+            'taskkill /F /IM chromedriver.exe /T'
+          ];
+          
+          for (const command of chromeKillCommands) {
+            try {
+              execSync(command, { stdio: 'ignore' });
+            } catch (e) {
+              // Ignore errors if no processes found
+            }
+          }
+          
+          console.log('Chrome processes cleanup completed');
+        } catch (execError) {
+          console.log('Error executing taskkill:', execError.message);
+        }
+      } else if (process.platform === 'darwin' || process.platform === 'linux') {
+        // On Mac or Linux, use pkill
+        try {
+          const { execSync } = require('child_process');
+          
+          // Mac/Linux killing commands
+          const killCommands = [
+            'pkill -f "Google Chrome"',
+            'pkill -f "Chromium"',
+            'pkill -f "chrome"'
+          ];
+          
+          for (const command of killCommands) {
+            try {
+              execSync(command, { stdio: 'ignore' });
+            } catch (e) {
+              // Ignore errors if no processes found
+            }
+          }
+          
+          console.log('Browser processes cleanup completed');
+        } catch (execError) {
+          console.log('Error executing pkill:', execError.message);
+        }
+      }
       
       // Signal to main process to clean up browser processes
       if (this.mainWindow && this.mainWindow.webContents) {
@@ -1205,6 +1423,212 @@ class WhatsAppService extends EventEmitter {
           'Try running the app with admin privileges'
         ]
       };
+    }
+  }
+
+  /**
+   * Detect Chrome installation path
+   * @returns {string|null} - Path to Chrome executable or null if not found
+   */
+  detectChromePath() {
+    // Possible Chrome paths by platform
+    const possiblePaths = {
+      win32: [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        // Chrome installed by user
+        path.join(os.homedir(), 'AppData\\Local\\Google\\Chrome\\Application\\chrome.exe'),
+        // Chrome Beta/Dev/Canary paths
+        'C:\\Program Files\\Google\\Chrome Beta\\Application\\chrome.exe',
+        'C:\\Program Files\\Google\\Chrome Dev\\Application\\chrome.exe',
+        'C:\\Program Files\\Google\\Chrome SxS\\Application\\chrome.exe',
+      ],
+      darwin: [
+        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+        '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+        // User-specific installations
+        path.join(os.homedir(), '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+      ],
+      linux: [
+        '/usr/bin/google-chrome',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/chromium',
+        '/usr/bin/microsoft-edge',
+        // Snap installations
+        '/snap/bin/chromium',
+      ]
+    };
+    
+    const platformPaths = possiblePaths[process.platform] || [];
+    
+    for (const browserPath of platformPaths) {
+      try {
+        if (fs.existsSync(browserPath)) {
+          console.log(`Found browser at: ${browserPath}`);
+          return browserPath;
+        }
+      } catch (error) {
+        console.error(`Error checking browser path ${browserPath}:`, error);
+      }
+    }
+    
+    console.warn('No Chrome/Edge installation found at common paths, will use system default');
+    return null;
+  }
+
+  /**
+   * Get user-friendly suggestions based on error message
+   * @param {Error} error - The error object
+   * @returns {Promise<string[]>} Array of suggestions
+   */
+  async getSuggestionForError(error) {
+    const suggestions = [];
+    const errorMsg = error.message || '';
+    
+    if (errorMsg.includes('Failed to launch the browser process')) {
+      suggestions.push('Chrome browser could not be launched. This could be due to:');
+      suggestions.push('- Chrome is not installed or accessible at the expected location');
+      suggestions.push('- Another Chrome instance is running with the same user profile');
+      suggestions.push('- The system is low on memory or resources');
+      suggestions.push('');
+      suggestions.push('Try these solutions:');
+      suggestions.push('1. Restart the application');
+      suggestions.push('2. Close other Chrome browser windows');
+      suggestions.push('3. Verify Chrome is properly installed on your system');
+      suggestions.push('4. Restart your computer');
+      
+      // Check if Chrome is actually installed
+      const diagnostics = await this.checkSystemRequirements();
+      if (!diagnostics.chromeInstalled) {
+        suggestions.push('');
+        suggestions.push('IMPORTANT: No Chrome installation was detected on your system.');
+        suggestions.push('Please install Google Chrome and try again.');
+      }
+    } 
+    else if (errorMsg.includes('Timed out')) {
+      suggestions.push('Connection timed out. This could be due to:');
+      suggestions.push('- Poor internet connection');
+      suggestions.push('- WhatsApp server issues');
+      suggestions.push('- Firewall or antivirus blocking the connection');
+      suggestions.push('');
+      suggestions.push('Try these solutions:');
+      suggestions.push('1. Check your internet connection');
+      suggestions.push('2. Temporarily disable firewall or antivirus');
+      suggestions.push('3. Try again later');
+    }
+    else if (errorMsg.includes('Protocol error') || errorMsg.includes('Target closed')) {
+      suggestions.push('Browser communication error. This could be due to:');
+      suggestions.push('- Chrome crashed or was closed externally');
+      suggestions.push('- System resources are limited');
+      suggestions.push('');
+      suggestions.push('Try these solutions:');
+      suggestions.push('1. Restart the application');
+      suggestions.push('2. Close unnecessary applications to free resources');
+      suggestions.push('3. Restart your computer');
+    }
+    
+    return suggestions;
+  }
+
+  /**
+   * Find installed Chrome or Edge browser path
+   * @returns {Promise<string|null>} - Path to Chrome executable or null for bundled browser
+   */
+  async findChromePath() {
+    try {
+      // First try the detect function
+      const detectedPath = this.detectChromePath();
+      if (detectedPath) {
+        return detectedPath;
+      }
+      
+      // If not found and on Windows, try registry query (more reliable)
+      if (process.platform === 'win32') {
+        console.log('Trying to find Chrome/Edge via Windows registry...');
+        try {
+          const chromePath = await this.getWindowsChromePath();
+          if (chromePath) {
+            return chromePath;
+          }
+        } catch (regError) {
+          console.error('Error finding Chrome via registry:', regError);
+        }
+      }
+      
+      // If we got this far, try to use the installed Puppeteer browser
+      console.log('Trying to use bundled Puppeteer browser...');
+      try {
+        const puppeteer = require('puppeteer');
+        const browserFetcher = puppeteer.createBrowserFetcher();
+        const revisionInfo = await browserFetcher.download('latest');
+        if (revisionInfo && revisionInfo.executablePath) {
+          console.log(`Using bundled Puppeteer Chrome at ${revisionInfo.executablePath}`);
+          return revisionInfo.executablePath;
+        }
+      } catch (puppeteerError) {
+        console.error('Error trying to use bundled Puppeteer browser:', puppeteerError);
+      }
+      
+      // If all else fails, return null to use system default
+      return null;
+    } catch (error) {
+      console.error('Error in findChromePath:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Get Chrome path on Windows via registry
+   * @returns {Promise<string|null>} - Path to Chrome executable or null
+   */
+  async getWindowsChromePath() {
+    try {
+      const { exec } = require('child_process');
+      const util = require('util');
+      const execAsync = util.promisify(exec);
+      
+      // Try Chrome first
+      try {
+        const { stdout: chromeKey } = await execAsync(
+          'reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\chrome.exe" /ve'
+        );
+        
+        if (chromeKey && chromeKey.includes('REG_SZ')) {
+          const match = chromeKey.match(/REG_SZ\s+([^\n]+)/);
+          if (match && match[1]) {
+            const path = match[1].trim();
+            console.log(`Found Chrome via registry: ${path}`);
+            return path;
+          }
+        }
+      } catch (chromeError) {
+        console.log('Chrome not found in registry, trying Edge...');
+      }
+      
+      // Try Edge as fallback
+      try {
+        const { stdout: edgeKey } = await execAsync(
+          'reg query "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\msedge.exe" /ve'
+        );
+        
+        if (edgeKey && edgeKey.includes('REG_SZ')) {
+          const match = edgeKey.match(/REG_SZ\s+([^\n]+)/);
+          if (match && match[1]) {
+            const path = match[1].trim();
+            console.log(`Found Edge via registry: ${path}`);
+            return path;
+          }
+        }
+      } catch (edgeError) {
+        console.log('Edge not found in registry.');
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error in getWindowsChromePath:', error);
+      return null;
     }
   }
 }

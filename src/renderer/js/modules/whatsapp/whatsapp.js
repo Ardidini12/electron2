@@ -19,6 +19,7 @@ function setupWhatsAppConnection() {
   const settingsConnectButton = document.getElementById('settings-connect-whatsapp');
   const settingsDisconnectButton = document.getElementById('settings-disconnect-whatsapp');
   const settingsLogoutButton = document.getElementById('settings-logout-whatsapp');
+  const settingsRestartButton = document.getElementById('settings-restart-whatsapp');
   
   // Connect button in sidebar
   if (connectButton) {
@@ -50,6 +51,11 @@ function setupWhatsAppConnection() {
     settingsLogoutButton.addEventListener('click', () => disconnectWhatsApp(true));
   }
   
+  // Restart button in settings page
+  if (settingsRestartButton) {
+    settingsRestartButton.addEventListener('click', restartWhatsAppService);
+  }
+  
   // Always hide the sidebar phone info - we'll only use the corner display
   const phoneInfoContainer = document.getElementById('phone-info');
   if (phoneInfoContainer) {
@@ -61,6 +67,9 @@ function setupWhatsAppConnection() {
   
   // Set up WhatsApp event listeners
   setupWhatsAppEventListeners();
+  
+  // Add connection watchdog
+  setupConnectionWatchdog();
   
   // Set up click handler for corner info
   const cornerInfo = document.getElementById('whatsapp-corner-info');
@@ -218,11 +227,20 @@ function setupWhatsAppEventListeners() {
   window.api.removeAllListeners('whatsapp-state');
   window.api.removeAllListeners('loading');
   window.api.removeAllListeners('browser-disconnected');
+  window.api.removeAllListeners('whatsapp-error');
+  window.api.removeAllListeners('whatsapp-suggestions');
   
   // Listen for status changes
   window.api.on('whatsapp-status', (status, reason) => {
     console.log(`WhatsApp status changed: ${status}`, reason || '');
     updateWhatsAppStatus(status);
+    
+    // If we got disconnected, schedule a recovery after a delay
+    if (status === 'DISCONNECTED' && !sessionDeleted) {
+      setTimeout(() => {
+        handleConnectionRecovery();
+      }, 10000); // Try recovery after 10 seconds
+    }
     
     // Only refresh phone info on CONNECTED state and not too frequently
     if (status === 'CONNECTED') {
@@ -246,11 +264,38 @@ function setupWhatsAppEventListeners() {
     hideQRCode();
     hidePhoneInfo();
     
-    // Wait a moment then attempt to reconnect
+    // Use the recovery function for better error handling
     setTimeout(() => {
-      resetAllButtons();
-      connectWhatsApp(true);
+      handleConnectionRecovery();
     }, 5000);
+  });
+  
+  // Listen for error events
+  window.api.on('whatsapp-error', (error) => {
+    console.log('WhatsApp error event received:', error);
+    showNotification('WhatsApp Error', error.message || 'Connection error occurred', 'error');
+    
+    // Update UI to show error
+    updateWhatsAppStatus('ERROR');
+    
+    // Attempt recovery after a delay
+    setTimeout(() => {
+      handleConnectionRecovery();
+    }, 15000);
+  });
+  
+  // Listen for suggestion events (from automatic troubleshooting)
+  window.api.on('whatsapp-suggestions', (suggestions) => {
+    if (suggestions && suggestions.length > 0) {
+      console.log('Received WhatsApp suggestions:', suggestions);
+      
+      // Format suggestions into a user-friendly message
+      const suggestionsList = suggestions.map(s => `• ${s}`).join('\n');
+      const message = `<strong>Troubleshooting Suggestions:</strong><br>${suggestionsList}`;
+      
+      // Show a notification with the suggestions
+      showNotification('WhatsApp Troubleshooting', message, 'info', 15000);
+    }
   });
   
   // Listen for phone info updates
@@ -619,6 +664,7 @@ function resetAllButtons() {
   const settingsConnectButton = document.getElementById('settings-connect-whatsapp');
   const settingsDisconnectButton = document.getElementById('settings-disconnect-whatsapp');
   const settingsLogoutButton = document.getElementById('settings-logout-whatsapp');
+  const settingsRestartButton = document.getElementById('settings-restart-whatsapp');
   
   if (settingsConnectButton) {
     settingsConnectButton.disabled = false;
@@ -635,6 +681,11 @@ function resetAllButtons() {
   if (settingsLogoutButton) {
     settingsLogoutButton.disabled = false;
     settingsLogoutButton.style.display = 'none';
+  }
+  
+  if (settingsRestartButton) {
+    settingsRestartButton.disabled = false;
+    settingsRestartButton.style.display = 'none';
   }
 }
 
@@ -757,6 +808,7 @@ function updateSettingsStatus(status) {
   const connectButton = document.getElementById('settings-connect-whatsapp');
   const disconnectButton = document.getElementById('settings-disconnect-whatsapp');
   const logoutButton = document.getElementById('settings-logout-whatsapp');
+  const restartButton = document.getElementById('settings-restart-whatsapp');
   const phoneInfoContainer = document.getElementById('settings-phone-info');
   
   if (!statusElement || !statusIndicator) return;
@@ -774,6 +826,7 @@ function updateSettingsStatus(status) {
       if (connectButton) connectButton.style.display = 'none';
       if (disconnectButton) disconnectButton.style.display = 'inline-block';
       if (logoutButton) logoutButton.style.display = 'inline-block';
+      if (restartButton) restartButton.style.display = 'inline-block';
       updateSettingsPhoneInfo();
       break;
     
@@ -781,6 +834,22 @@ function updateSettingsStatus(status) {
       if (connectButton) connectButton.style.display = 'none';
       if (disconnectButton) disconnectButton.style.display = 'inline-block';
       if (logoutButton) logoutButton.style.display = 'inline-block';
+      if (restartButton) restartButton.style.display = 'inline-block';
+      break;
+    
+    case 'ERROR':
+    case 'MAX_RESTARTS_EXCEEDED':
+      if (connectButton) connectButton.style.display = 'inline-block';
+      if (disconnectButton) disconnectButton.style.display = 'none';
+      if (logoutButton) logoutButton.style.display = 'inline-block';
+      if (restartButton) restartButton.style.display = 'inline-block';
+      if (phoneInfoContainer) phoneInfoContainer.style.display = 'none';
+      
+      // For serious errors, highlight the restart button
+      if (restartButton) {
+        restartButton.classList.add('btn-warning');
+        restartButton.innerHTML = '<i class="fas fa-sync-alt"></i> Repair Connection';
+      }
       break;
     
     case 'DISCONNECTED':
@@ -791,6 +860,7 @@ function updateSettingsStatus(status) {
       }
       if (disconnectButton) disconnectButton.style.display = 'none';
       if (logoutButton) logoutButton.style.display = 'none';
+      if (restartButton) restartButton.style.display = 'none';
       if (phoneInfoContainer) phoneInfoContainer.style.display = 'none';
       break;
     
@@ -799,6 +869,7 @@ function updateSettingsStatus(status) {
         connectButton.disabled = true;
         connectButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
       }
+      if (restartButton) restartButton.style.display = 'none';
       break;
       
     case 'DISCONNECTING':
@@ -806,6 +877,7 @@ function updateSettingsStatus(status) {
         disconnectButton.disabled = true;
         disconnectButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Disconnecting...';
       }
+      if (restartButton) restartButton.style.display = 'none';
       break;
     
     case 'SCANNING':
@@ -814,6 +886,7 @@ function updateSettingsStatus(status) {
         connectButton.innerHTML = '<i class="fas fa-qrcode"></i> Scan QR Code';
       }
       if (disconnectButton) disconnectButton.style.display = 'inline-block';
+      if (restartButton) restartButton.style.display = 'none';
       break;
     
     default:
@@ -899,9 +972,11 @@ function updateConnectedPhoneInfo() {
       const settingsConnectButton = document.getElementById('settings-connect-whatsapp');
       const settingsDisconnectButton = document.getElementById('settings-disconnect-whatsapp');
       const settingsLogoutButton = document.getElementById('settings-logout-whatsapp');
+      const settingsRestartButton = document.getElementById('settings-restart-whatsapp');
       if (settingsConnectButton) settingsConnectButton.style.display = 'none';
       if (settingsDisconnectButton) settingsDisconnectButton.style.display = 'inline-block';
       if (settingsLogoutButton) settingsLogoutButton.style.display = 'inline-block';
+      if (settingsRestartButton) settingsRestartButton.style.display = 'inline-block';
     })
     .catch(error => {
       console.error('Error fetching phone info:', error);
@@ -1241,6 +1316,198 @@ async function refreshPhoneInfo() {
   }
 }
 
+/**
+ * Set up a connection watchdog that periodically checks WhatsApp connection
+ * and automatically attempts to recover if disconnected
+ */
+function setupConnectionWatchdog() {
+  // Check connection every 3 minutes
+  const watchdogInterval = 3 * 60 * 1000;
+  
+  console.log('Setting up WhatsApp connection watchdog');
+  
+  // Set up the interval
+  const watchdogTimer = setInterval(async () => {
+    try {
+      // Get current status
+      const status = await window.api.getWhatsAppStatus();
+      console.log('Watchdog checking WhatsApp status:', status);
+      
+      // If connected, just verify it's actually connected by getting info
+      if (status.isConnected) {
+        try {
+          const phoneInfo = await window.api.getWhatsAppInfo();
+          if (!phoneInfo || !phoneInfo.connected) {
+            console.log('Watchdog detected false connected state, reconnecting...');
+            await handleConnectionRecovery();
+          } else {
+            console.log('Watchdog confirmed WhatsApp is properly connected');
+          }
+        } catch (error) {
+          console.error('Watchdog error checking phone info:', error);
+          await handleConnectionRecovery();
+        }
+      } 
+      // If not connected but session exists, try to reconnect
+      else if (status.hasExistingSession && !sessionDeleted) {
+        console.log('Watchdog detected disconnected state with existing session, reconnecting...');
+        await handleConnectionRecovery();
+      }
+    } catch (error) {
+      console.error('Watchdog error checking WhatsApp status:', error);
+    }
+  }, watchdogInterval);
+  
+  // Store the timer ID on the window object so it persists
+  window.whatsappWatchdogTimer = watchdogTimer;
+  
+  // Also create a more aggressive recovery check that runs every 15 minutes
+  const deepRecoveryInterval = 15 * 60 * 1000;
+  
+  const deepRecoveryTimer = setInterval(async () => {
+    try {
+      // Get current status
+      const status = await window.api.getWhatsAppStatus();
+      
+      // If disconnected for any reason, try a deep recovery
+      if (!status.isConnected) {
+        console.log('Deep recovery process initiating after prolonged disconnection');
+        await performDeepRecovery();
+      }
+    } catch (error) {
+      console.error('Deep recovery check error:', error);
+    }
+  }, deepRecoveryInterval);
+  
+  // Store the timer ID
+  window.whatsappDeepRecoveryTimer = deepRecoveryTimer;
+}
+
+/**
+ * Handle connection recovery in case of disconnection
+ */
+async function handleConnectionRecovery() {
+  try {
+    console.log('Starting WhatsApp connection recovery process');
+    
+    // First try a simple reconnect
+    updateWhatsAppStatus('RECONNECTING');
+    
+    // Use the repair connection feature
+    const result = await window.api.repairWhatsAppConnection();
+    console.log('Repair connection result:', result);
+    
+    if (result && result.success) {
+      showNotification('WhatsApp', 'Connection successfully repaired', 'success');
+      updateWhatsAppStatus('CONNECTED');
+      return true;
+    }
+    
+    // If simple reconnect failed, try a full reconnect
+    console.log('Simple repair failed, trying full reconnect');
+    
+    // Disconnect first (without deleting session)
+    await window.api.disconnectWhatsApp(false);
+    
+    // Wait a moment for cleanup
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Try to connect again
+    await connectWhatsApp(true);
+    
+    return true;
+  } catch (error) {
+    console.error('Error during connection recovery:', error);
+    showNotification('WhatsApp Error', 'Failed to recover connection, will retry later', 'error');
+    return false;
+  }
+}
+
+/**
+ * Perform deep recovery for more serious connection issues
+ */
+async function performDeepRecovery() {
+  try {
+    console.log('Starting deep recovery process');
+    
+    // Show notification
+    showNotification('WhatsApp', 'Performing deep connection recovery...', 'info');
+    
+    // First, reset the WhatsApp session entirely
+    await window.api.resetWhatsAppSession();
+    
+    // Wait for a moment to ensure cleanup
+    await new Promise(resolve => setTimeout(resolve, 8000));
+    
+    // Now initiate a fresh connection
+    await window.api.initWhatsApp(true);
+    
+    // Show success notification
+    showNotification('WhatsApp', 'Deep recovery process completed', 'success');
+    
+    return true;
+  } catch (error) {
+    console.error('Error during deep recovery:', error);
+    showNotification('WhatsApp Error', 'Deep recovery failed, will retry later', 'error');
+    return false;
+  }
+}
+
+/**
+ * Manually restart the WhatsApp service when there are connection issues
+ */
+async function restartWhatsAppService() {
+  try {
+    // Update UI
+    const restartButton = document.getElementById('settings-restart-whatsapp');
+    if (restartButton) {
+      restartButton.disabled = true;
+      restartButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Repairing...';
+    }
+    
+    // Show notification
+    showNotification('WhatsApp', 'Repairing WhatsApp connection...', 'info');
+    
+    // Call the main process to restart the service
+    const result = await window.api.restartWhatsAppService();
+    
+    // Process result
+    if (result && result.success) {
+      showNotification('WhatsApp', 'WhatsApp connection repaired successfully', 'success');
+      
+      // Reset UI
+      if (restartButton) {
+        restartButton.disabled = false;
+        restartButton.innerHTML = '<i class="fas fa-sync-alt"></i> Restart Service';
+        restartButton.classList.remove('btn-warning');
+      }
+      
+      // Check status after a delay
+      setTimeout(async () => {
+        await checkWhatsAppStatus();
+      }, 5000);
+    } else {
+      showNotification('WhatsApp Error', result.error || 'Failed to repair connection', 'error');
+      
+      // Reset UI but keep warning style
+      if (restartButton) {
+        restartButton.disabled = false;
+        restartButton.innerHTML = '<i class="fas fa-sync-alt"></i> Retry Repair';
+      }
+    }
+  } catch (error) {
+    console.error('Error restarting WhatsApp service:', error);
+    showNotification('WhatsApp Error', error.message || 'Failed to restart service', 'error');
+    
+    // Reset button
+    const restartButton = document.getElementById('settings-restart-whatsapp');
+    if (restartButton) {
+      restartButton.disabled = false;
+      restartButton.innerHTML = '<i class="fas fa-sync-alt"></i> Retry Repair';
+    }
+  }
+}
+
 // Export WhatsApp functions
 export {
   setupWhatsAppConnection,
@@ -1257,5 +1524,9 @@ export {
   resetAllButtons,
   updateCornerWhatsAppInfo,
   loadWhatsAppInfoFromLocalStorage,
-  saveWhatsAppInfoToLocalStorage
+  saveWhatsAppInfoToLocalStorage,
+  setupConnectionWatchdog,
+  handleConnectionRecovery,
+  performDeepRecovery,
+  restartWhatsAppService
 }; 

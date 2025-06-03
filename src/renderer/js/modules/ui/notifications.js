@@ -22,9 +22,9 @@ function setupNotifications() {
 /**
  * Show a notification message
  * @param {string} title - The notification title
- * @param {string} message - The notification message
+ * @param {string|HTMLElement} message - The notification message (can be HTML content)
  * @param {string} type - The notification type (info, success, warning, error)
- * @param {number} timeout - The timeout in milliseconds
+ * @param {number} timeout - The timeout in milliseconds (0 for no auto-dismiss)
  */
 function showNotification(title, message, type = 'info', timeout = 5000) {
   // Get or create the notifications container
@@ -45,6 +45,19 @@ function showNotification(title, message, type = 'info', timeout = 5000) {
   if (type === 'warning') icon = 'exclamation-triangle';
   if (type === 'error') icon = 'times-circle';
   
+  // Create message container
+  const messageContainer = document.createElement('div');
+  messageContainer.className = 'notification-message';
+  
+  // Add content to message container
+  if (typeof message === 'string') {
+    // Handle simple string content
+    messageContainer.innerHTML = message;
+  } else if (message instanceof HTMLElement) {
+    // Handle HTML element content
+    messageContainer.appendChild(message);
+  }
+  
   // Set notification content
   notification.innerHTML = `
     <div class="notification-icon">
@@ -52,12 +65,15 @@ function showNotification(title, message, type = 'info', timeout = 5000) {
     </div>
     <div class="notification-content">
       <div class="notification-title">${title}</div>
-      <div class="notification-message">${message}</div>
     </div>
     <div class="notification-close">
       <i class="fas fa-times"></i>
     </div>
   `;
+  
+  // Add message container to notification content
+  const contentDiv = notification.querySelector('.notification-content');
+  contentDiv.appendChild(messageContainer);
   
   // Add close button event
   const closeButton = notification.querySelector('.notification-close');
@@ -68,7 +84,7 @@ function showNotification(title, message, type = 'info', timeout = 5000) {
   // Add to container
   container.appendChild(notification);
   
-  // Set timeout to auto-remove
+  // Set timeout to auto-remove if timeout > 0
   if (timeout > 0) {
     setTimeout(() => {
       removeNotification(notification);

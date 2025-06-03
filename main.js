@@ -20,6 +20,12 @@ let mainWindow;
 // Initialize the database
 let dbInitialized = false;
 
+// Add this near the top of the file with other global variables
+let whatsAppRestartCount = 0;
+const MAX_WHATSAPP_RESTARTS = 5; // Max restarts in a 30-minute period
+let whatsAppRestartTimer = null;
+let whatsAppHeartbeatInterval = null;
+
 // Helper function to format phone numbers to E.164 format
 function formatPhoneNumber(phoneNumber) {
   if (!phoneNumber) return '';
@@ -231,9 +237,8 @@ app.whenReady().then(async () => {
       }
     }
     
-    // Set up WhatsApp event listeners
-    console.log('Setting up WhatsApp event listeners...');
-    setupWhatsAppEventListeners();
+    // Set up WhatsApp with auto-restart capability
+    setupWhatsAppWithAutoRestart();
     
     // Set protocol handler for loading ES modules
     console.log('Registering vite protocol handler...');
@@ -351,6 +356,129 @@ app.whenReady().then(async () => {
     setTimeout(() => app.quit(), 3000);
   }
 });
+
+// Setup WhatsApp with auto-restart capability
+function setupWhatsAppWithAutoRestart() {
+  // Clear any existing heartbeat
+  if (whatsAppHeartbeatInterval) {
+    clearInterval(whatsAppHeartbeatInterval);
+  }
+  
+  // Setup the event listeners first
+  setupWhatsAppEventListeners();
+  
+  // Setup a heartbeat check every 5 minutes
+  whatsAppHeartbeatInterval = setInterval(async () => {
+    try {
+      console.log('Running WhatsApp heartbeat check');
+      
+      // Get the current status
+      const status = whatsAppService.getStatus();
+      console.log('WhatsApp heartbeat status:', status);
+      
+      // If WhatsApp should be connected but isn't, attempt to restart it
+      if (status.hasExistingSession && !status.isConnected) {
+        console.log('WhatsApp heartbeat detected disconnected state with session, attempting recovery');
+        
+        // Check if we've exceeded the restart limit
+        if (whatsAppRestartCount < MAX_WHATSAPP_RESTARTS) {
+          // Increment restart count
+          whatsAppRestartCount++;
+          console.log(`Restarting WhatsApp service (${whatsAppRestartCount}/${MAX_WHATSAPP_RESTARTS})`);
+          
+          // Restart the service (will cleanup and reconnect)
+          restartWhatsAppService();
+          
+          // If this is the first restart, set up the reset timer
+          if (whatsAppRestartCount === 1) {
+            // Reset the restart count after 30 minutes
+            whatsAppRestartTimer = setTimeout(() => {
+              console.log('Resetting WhatsApp restart count');
+              whatsAppRestartCount = 0;
+              whatsAppRestartTimer = null;
+            }, 30 * 60 * 1000);
+          }
+        } else {
+          console.log('Max restarts exceeded, will not auto-restart until timer resets');
+          // Notify the renderer of the issue
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('whatsapp-status', 'MAX_RESTARTS_EXCEEDED');
+          }
+        }
+      }
+      
+      // Otherwise if everything looks good, make sure any error UI is cleared
+      else if (status.isConnected) {
+        // Make sure the UI knows we're connected
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('whatsapp-status', 'CONNECTED');
+        }
+      }
+    } catch (error) {
+      console.error('Error in WhatsApp heartbeat check:', error);
+    }
+  }, 5 * 60 * 1000);
+  
+  console.log('WhatsApp auto-restart mechanism initialized');
+}
+
+// Function to restart the WhatsApp service
+async function restartWhatsAppService() {
+  try {
+    console.log('Attempting to restart WhatsApp service');
+    
+    // Disconnect if connected
+    if (whatsAppService.getStatus().isConnected) {
+      try {
+        await whatsAppService.disconnect(false);
+      } catch (disconnectError) {
+        console.error('Error disconnecting WhatsApp during restart:', disconnectError);
+      }
+    }
+    
+    // Clean up any browser sessions
+    try {
+      await whatsAppService.cleanupBrowserSession();
+    } catch (cleanupError) {
+      console.error('Error cleaning up browser session during restart:', cleanupError);
+    }
+    
+    // Force kill any Chrome processes
+    killChromiumProcesses();
+    
+    // Wait for everything to clean up
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Attempt to initialize WhatsApp again
+    try {
+      console.log('Reinitializing WhatsApp');
+      const result = await whatsAppService.initialize();
+      console.log('WhatsApp reinitialization result:', result);
+      
+      // Notify the renderer of the result
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (result.success) {
+          mainWindow.webContents.send('whatsapp-status', 'RECONNECTING');
+        } else {
+          mainWindow.webContents.send('whatsapp-error', { 
+            message: result.error || 'Failed to restart WhatsApp service'
+          });
+        }
+      }
+    } catch (initError) {
+      console.error('Error reinitializing WhatsApp during restart:', initError);
+      
+      // Notify the renderer of the error
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('whatsapp-error', { 
+          message: initError.message || 'Failed to restart WhatsApp service'
+        });
+      }
+    }
+  } catch (error) {
+    console.error('Error in restartWhatsAppService:', error);
+  }
+}
 
 // Set up event listeners for WhatsApp service
 function setupWhatsAppEventListeners() {
@@ -1409,5 +1537,123 @@ ipcMain.handle('get-available-cities', async () => {
   } catch (error) {
     console.error('Error in get-available-cities handler:', error);
     return { error: error.message };
+  }
+});
+
+// Add new handler for manual recovery
+ipcMain.handle('manual-sales-recovery', async (event, startDate, endDate) => {
+  try {
+    console.log(`Manual sales recovery requested from ${startDate} to ${endDate}`);
+    return await salesApiController.manualRecovery(startDate, endDate);
+  } catch (error) {
+    console.error('Error in manual-sales-recovery handler:', error);
+    return { 
+      success: false, 
+      error: error.message 
+    };
+  }
+});
+
+// Reset WhatsApp session
+ipcMain.handle('reset-whatsapp-session', async () => {
+  try {
+    console.log('Resetting WhatsApp session...');
+    
+    // Disconnect first if connected
+    const status = whatsAppService.getStatus();
+    if (status.isConnected) {
+      await whatsAppService.disconnect();
+    }
+    
+    // Delete session data
+    await whatsAppService.deleteSessionData();
+    
+    // Thorough cleanup of browser sessions
+    await whatsAppService.cleanupBrowserSession();
+    
+    console.log('WhatsApp session reset complete');
+    return { success: true };
+  } catch (error) {
+    console.error('Error resetting WhatsApp session:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Repair WhatsApp connection
+ipcMain.handle('repair-whatsapp-connection', async () => {
+  try {
+    console.log('Attempting to repair WhatsApp connection...');
+    
+    // First, disconnect if connected
+    const status = whatsAppService.getStatus();
+    if (status.isConnected) {
+      await whatsAppService.disconnect();
+    }
+    
+    // Clean up any browser sessions (but don't delete the session data)
+    await whatsAppService.cleanupBrowserSession();
+    
+    // Try to kill any hanging browser processes
+    whatsAppService.killOldBrowserProcesses();
+    
+    // Wait a moment before reconnecting
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Try to reconnect
+    const result = await whatsAppService.initialize(false);
+    
+    console.log('WhatsApp repair attempt result:', result);
+    return result;
+  } catch (error) {
+    console.error('Error repairing WhatsApp connection:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Get WhatsApp diagnostics
+ipcMain.handle('get-whatsapp-diagnostics', async () => {
+  try {
+    console.log('Getting WhatsApp diagnostics...');
+    
+    // Get system requirements
+    const systemDiagnostics = await whatsAppService.checkSystemRequirements();
+    
+    // Get current status
+    const status = whatsAppService.getStatus();
+    
+    // Check for session files
+    const hasSession = whatsAppService.hasExistingSession();
+    
+    // Additional information for diagnostics
+    const diagnostics = {
+      ...systemDiagnostics,
+      status,
+      hasSession,
+      sessionPath: whatsAppService.sessionPath,
+      reconnectAttempts: whatsAppService.reconnectAttempts,
+      platform: process.platform,
+      osVersion: process.getSystemVersion(),
+      appVersion: app.getVersion(),
+      memory: process.getSystemMemoryInfo(),
+      availableLocales: app.getPreferredSystemLanguages()
+    };
+    
+    console.log('WhatsApp diagnostics collected:', diagnostics);
+    return diagnostics;
+  } catch (error) {
+    console.error('Error getting WhatsApp diagnostics:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Add a new IPC handler for manual WhatsApp service restart
+ipcMain.handle('restart-whatsapp-service', async () => {
+  try {
+    console.log('Manual WhatsApp service restart requested');
+    await restartWhatsAppService();
+    return { success: true };
+  } catch (error) {
+    console.error('Error during manual WhatsApp service restart:', error);
+    return { success: false, error: error.message };
   }
 });
