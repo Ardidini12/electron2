@@ -9,4 +9,5 @@ export * from './dashboard/dashboard.js';
 export * from './ui/notifications.js';
 export * from './utils/api.js';
 export * from './utils/helpers.js';
-export * from './utils/moduleLoader.js'; 
+export * from './utils/moduleLoader.js';
+export * from './sales-api/sales-messages.js'; 

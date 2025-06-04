@@ -4,6 +4,7 @@
  */
 import { showNotification } from '../../utils/notifications.js';
 import { formatDate, formatDateTime } from '../../utils/date-formatter.js';
+import * as salesMessages from './sales-messages.js';
 
 // Create a singleton instance to ensure timer persistence across navigation
 let salesApiInstance = null;
@@ -36,7 +37,7 @@ export default class SalesApiModule {
     this.contactDetails = null;
     this.syncTimer = null;
     this.countdownInterval = null;
-    this.refreshInterval = 120; // seconds
+    this.refreshInterval = 10; // seconds
     this.countdown = this.refreshInterval;
     this.cities = [];
     this.isRefreshing = false;
@@ -82,6 +83,9 @@ export default class SalesApiModule {
       
       // Setup table event listeners
       this.attachTableEventListeners();
+      
+      // Initialize sales messages UI
+      await salesMessages.initSalesMessages();
       
       // Check if delete modal elements exist
       const deleteModal = document.getElementById('delete-sales-modal');
@@ -609,13 +613,13 @@ export default class SalesApiModule {
     tableBody.innerHTML = `
       <tr class="loading-row">
         <td colspan="9" class="text-center">
-          <div class="loading-spinner">
+            <div class="loading-spinner">
             <i class="fas fa-spinner fa-spin"></i>
             <p>Loading contacts...</p>
-          </div>
-        </td>
-      </tr>
-    `;
+            </div>
+          </td>
+        </tr>
+      `;
   }
   
   /**
@@ -633,9 +637,9 @@ export default class SalesApiModule {
             <i class="fas fa-inbox"></i>
             <p>${message}</p>
           </div>
-        </td>
-      </tr>
-    `;
+          </td>
+        </tr>
+      `;
   }
   
   /**
@@ -748,7 +752,7 @@ export default class SalesApiModule {
         } else {
           this.selectedContacts.delete(parseInt(checkbox.dataset.id));
         }
-        this.updateSelectAllCheckbox();
+    this.updateSelectAllCheckbox();
         this.updateDeleteSelectedButton();
       });
     });
@@ -853,7 +857,7 @@ export default class SalesApiModule {
     if (!paginationContainer) return;
     
     // Clear the container
-    paginationContainer.innerHTML = '';
+      paginationContainer.innerHTML = '';
     
     const { total, page, limit, pages } = this.pagination;
     
@@ -931,7 +935,7 @@ export default class SalesApiModule {
       pageBtn.addEventListener('click', () => {
         if (i !== page) {
           this.pagination.page = i;
-          this.loadSalesContacts();
+        this.loadSalesContacts();
         }
       });
       paginationControls.appendChild(pageBtn);
@@ -1481,36 +1485,34 @@ export default class SalesApiModule {
     // Clear any existing intervals
     if (this.syncTimer) {
       clearInterval(this.syncTimer);
+      this.syncTimer = null;
     }
     
-    // Only reset countdown interval if it doesn't exist
-    if (!this.countdownInterval) {
-      this.countdownInterval = setInterval(() => {
-        this.countdown--;
-        if (this.countdown <= 0) {
-          this.countdown = this.refreshInterval;
-          // Trigger a refresh when countdown hits zero
-          this.loadSalesContacts(true);
-        }
-        this.updateCountdownDisplay();
-      }, 1000);
+    if (this.countdownInterval) {
+      clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
     }
     
-    // Only set up sync timer if it doesn't exist
-    if (!this.syncTimer) {
-      // The main timer is just a backup in case the countdown doesn't trigger
-      this.syncTimer = setInterval(() => {
-        // Only refresh if countdown is at or very near zero
-        if (this.countdown <= 2) {
+    // Reset the countdown
+    this.countdown = this.refreshInterval;
+    
+    // Set up countdown interval
+    this.countdownInterval = setInterval(() => {
+      this.countdown--;
+      if (this.countdown <= 0) {
+        this.countdown = this.refreshInterval;
+        // Trigger a refresh when countdown hits zero
+        if (!this.isRefreshing) {
           this.loadSalesContacts(true);
         }
-      }, this.refreshInterval * 1000);
-    }
+      }
+      this.updateCountdownDisplay();
+    }, 1000);
     
     // Update display immediately
     this.updateCountdownDisplay();
     
-    console.log('Auto-refresh setup complete: refresh every', this.refreshInterval, 'seconds, current countdown:', this.countdown);
+    console.log('Auto-refresh setup complete: refresh every', this.refreshInterval, 'seconds');
   }
   
   /**
@@ -1552,17 +1554,21 @@ export default class SalesApiModule {
       clearInterval(this.syncStatusInterval);
     }
     
-    // Set more frequent checks if sync is running
-    const checkInterval = isRunning ? 1000 : 5000; // 1 sec when running, 5 sec when idle
+    // Set fixed interval of 2 seconds - frequent enough for responsiveness
+    // but not too frequent to overload the system
+    const checkInterval = 2000; // 2 seconds
     
     this.syncStatusInterval = setInterval(() => {
       this.updateSyncStatus().then(stillRunning => {
-        // If sync status changed, update the interval
+        // If sync status changed, update the UI (no need to reset interval)
         if (stillRunning !== isRunning) {
-          this.setStatusCheckInterval(stillRunning);
+          this.isRunning = stillRunning;
+          console.log('Sync status changed:', stillRunning ? 'now running' : 'now idle');
         }
       });
     }, checkInterval);
+    
+    console.log(`Status check interval set to ${checkInterval}ms`);
   }
   
   /**
@@ -1571,7 +1577,6 @@ export default class SalesApiModule {
   async updateSyncStatus() {
     try {
       const status = await window.api.getSalesSyncStatus();
-      console.log('Sync status response:', status);
       
       // Update sync status indicator
       const statusIndicator = document.getElementById('sales-sync-status');
@@ -1582,7 +1587,6 @@ export default class SalesApiModule {
         
         // Check if isRunning is defined and is a boolean
         const isRunning = typeof status.isRunning === 'boolean' ? status.isRunning : false;
-        console.log('Sync isRunning:', isRunning);
         
         if (isRunning) {
           statusIndicator.classList.add('running');
@@ -1593,25 +1597,27 @@ export default class SalesApiModule {
         }
       }
       
-      // Track if last sync time has changed to trigger a refresh
-      let syncTimeChanged = false;
+      // Check if last sync time has changed from our stored value
+      let shouldRefresh = false;
+      
+      if (status.lastSync) {
+        const newSyncTime = new Date(status.lastSync).getTime();
+        
+        if (!this.lastSyncTime || newSyncTime > this.lastSyncTime) {
+          shouldRefresh = true;
+          this.lastSyncTime = newSyncTime;
+          console.log('New sync detected, will refresh data');
+        }
+      }
       
       // Update last sync info
       const lastSyncElement = document.getElementById('last-sync-time');
-      const nextSyncElement = document.getElementById('next-sync-time');
-      
       if (lastSyncElement) {
-        const currentText = lastSyncElement.textContent;
-        const newText = status.lastSync ? formatDateTime(status.lastSync) : 'Never';
-        
-        // If the last sync time has changed, we'll refresh the data
-        if (currentText !== newText) {
-          syncTimeChanged = true;
-        }
-        
-        lastSyncElement.textContent = newText;
+        lastSyncElement.textContent = status.lastSync ? formatDateTime(status.lastSync) : 'Never';
       }
       
+      // Update next sync info
+      const nextSyncElement = document.getElementById('next-sync-time');
       if (nextSyncElement && status.nextSync) {
         nextSyncElement.textContent = formatDateTime(status.nextSync);
       }
@@ -1619,17 +1625,32 @@ export default class SalesApiModule {
       // Update sync stats
       this.updateSyncStats(status);
       
-      // If sync time changed, refresh the contacts data
-      if (syncTimeChanged && !this.isRefreshing) {
-        console.log('Detected new sync completion, refreshing contacts data');
+      // Refresh the contacts data if needed
+      if (shouldRefresh && !this.isRefreshing) {
         this.isRefreshing = true;
-        await this.loadSalesContacts();
-        this.isRefreshing = false;
+        try {
+          await this.loadSalesContacts();
+        } finally {
+          this.isRefreshing = false;
+        }
       }
       
       return typeof status.isRunning === 'boolean' ? status.isRunning : false;
     } catch (error) {
       console.error('Error updating sync status:', error);
+      
+      // Update UI to show error state
+      const statusIndicator = document.getElementById('sales-sync-status');
+      const statusText = document.getElementById('sales-sync-text');
+      
+      if (statusIndicator) {
+        statusIndicator.className = 'status-indicator stopped';
+      }
+      
+      if (statusText) {
+        statusText.textContent = 'Sync Status: Error';
+      }
+      
       return false;
     }
   }

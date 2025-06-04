@@ -88,92 +88,187 @@ const sequelize = new Sequelize({
   }
 });
 
-// Import model definitions
-const ContactModel = require('../models/Contact');
-const TemplateModel = require('../models/Template');
-const MessageModel = require('../models/Message');
-const ScheduleSettingsModel = require('../models/ScheduleSettings');
-const SalesContactModel = require('../models/SalesContact');
-    
-// Initialize models with the single sequelize instance
-const Contact = ContactModel(sequelize);
-const Template = TemplateModel(sequelize);
-const Message = MessageModel(sequelize);
-const ScheduleSettings = ScheduleSettingsModel(sequelize);
-const SalesContact = SalesContactModel(sequelize);
-    
+// Import the models
+const Contact = require('../models/Contact')(sequelize);
+const Template = require('../models/Template')(sequelize);
+const Message = require('../models/Message')(sequelize);
+const ScheduleSettings = require('../models/ScheduleSettings')(sequelize);
+const SalesContact = require('../models/SalesContact')(sequelize);
+// Add new models
+const SalesMessageSettings = require('../models/SalesMessageSettings')(sequelize);
+const SalesMessageTemplate = require('../models/SalesMessageTemplate')(sequelize);
+const SalesScheduledMessage = require('../models/SalesScheduledMessage')(sequelize);
+
+// Export the models
 const models = {
   Contact,
   Template,
   Message,
   ScheduleSettings,
-  SalesContact
+  SalesContact,
+  // Add new models
+  SalesMessageSettings,
+  SalesMessageTemplate,
+  SalesScheduledMessage
 };
 
-// Define associations between models
+/**
+ * Set up associations between models
+ */
 function setupAssociations() {
-  Message.belongsTo(Contact);
+  // Existing associations
   Contact.hasMany(Message);
-  Message.belongsTo(Template);
+  Message.belongsTo(Contact);
+
   Template.hasMany(Message);
+  Message.belongsTo(Template);
+
+  // New associations for sales messages
+  SalesContact.hasMany(SalesScheduledMessage);
+  SalesScheduledMessage.belongsTo(SalesContact);
+
+  SalesMessageTemplate.hasMany(SalesScheduledMessage);
+  SalesScheduledMessage.belongsTo(SalesMessageTemplate);
 }
 
 setupAssociations();
 
+/**
+ * Ensure all required tables exist
+ * @returns {Promise<boolean>} True if tables exist or were created
+ */
 async function ensureTablesExist() {
   try {
     console.log('Checking database tables...');
     
-    // First check if tables exist by querying them
-    let tablesExist = false;
+    // Check if tables exist by attempting to query
     try {
       await sequelize.query('SELECT 1 FROM Contacts LIMIT 1');
       await sequelize.query('SELECT 1 FROM Templates LIMIT 1');
       await sequelize.query('SELECT 1 FROM Messages LIMIT 1');
       await sequelize.query('SELECT 1 FROM ScheduleSettings LIMIT 1');
-      // Check if SalesContacts exists but don't fail if it doesn't
-      try {
-        await sequelize.query('SELECT 1 FROM SalesContacts LIMIT 1');
-        console.log('SalesContacts table exists');
-      } catch (err) {
-        console.log('SalesContacts table does not exist, will create it');
-      }
-      tablesExist = true;
-    } catch (err) {
-      console.log('Tables do not exist, need to create them');
-      tablesExist = false;
-    }
-    
-    // Only sync if tables don't exist
-    if (!tablesExist) {
-      console.log('Creating database tables...');
-      await sequelize.sync({ force: false });
-      console.log('All tables created successfully');
       
-      // Create default schedule settings if none exist
-      const existingSettings = await ScheduleSettings.findOne();
-      if (!existingSettings) {
-        await ScheduleSettings.create({
-          activeDays: [1, 2, 3, 4, 5],
-          startTime: 540,
-          endTime: 1020,
-          messageInterval: 45,
-          isActive: false
-        });
-        console.log('Default schedule settings created');
-      }
-    } else {
-      // Only sync the SalesContacts table if it doesn't exist
-      try {
-        await sequelize.query('SELECT 1 FROM SalesContacts LIMIT 1');
-      } catch (err) {
-        console.log('Creating SalesContacts table...');
-        await SalesContact.sync({ force: false });
-        console.log('SalesContacts table created successfully');
-      }
       console.log('All required tables already exist');
+      return true;
+    } catch (error) {
+      console.log('Some tables are missing, creating them...');
+      
+      // Set up associations between models
+      setupAssociations();
+      
+      // Create tables if they don't exist
+      await Contact.sync({ force: false });
+      await Template.sync({ force: false });
+      await Message.sync({ force: false });
+      await ScheduleSettings.sync({ force: false });
+      await SalesContact.sync({ force: false });
+      // Add new tables
+      await SalesMessageSettings.sync({ force: false });
+      await SalesMessageTemplate.sync({ force: false });
+      await SalesScheduledMessage.sync({ force: false });
+      
+      console.log('Tables created successfully');
+      
+      // Create default settings if they don't exist
+      try {
+        const settingsCount = await ScheduleSettings.count();
+        if (settingsCount === 0) {
+          await ScheduleSettings.create({
+            activeDays: [1, 2, 3, 4, 5],
+            startTime: 540,
+            endTime: 1020,
+            messageInterval: 45,
+            isActive: false
+          });
+          console.log('Default schedule settings created');
+        }
+        
+        // Create default sales message settings if they don't exist
+        const salesSettingsCount = await SalesMessageSettings.count();
+        if (salesSettingsCount === 0) {
+          await SalesMessageSettings.create({
+            firstMessageDelay: 7200000, // 2 hours
+            secondMessageDelay: 15552000000, // 6 months
+            isAutoSchedulingEnabled: false,
+            isAutoSendingEnabled: false
+          });
+          console.log('Default sales message settings created');
+        }
+        
+        // Create default sales message templates if they don't exist
+        const salesTemplatesCount = await SalesMessageTemplate.count();
+        if (salesTemplatesCount === 0) {
+          await SalesMessageTemplate.create({
+            content: 'Hello {name}, thank you for your purchase! How was your experience?',
+            messageType: 'FIRST'
+          });
+          
+          await SalesMessageTemplate.create({
+            content: 'Hello {name}, it\'s been a while since your last purchase. We miss you! Check out our latest products.',
+            messageType: 'SECOND'
+          });
+          
+          console.log('Default sales message templates created');
+        }
+      } catch (err) {
+        console.error('Error creating default settings:', err);
+      }
     }
     
+    // Check for SalesContacts table
+    try {
+      await sequelize.query('SELECT 1 FROM SalesContacts LIMIT 1');
+    } catch (err) {
+      console.log('Creating SalesContacts table...');
+      await SalesContact.sync({ force: false });
+      console.log('SalesContacts table created successfully');
+    }
+    
+    // Check for new sales message tables
+    try {
+      await sequelize.query('SELECT 1 FROM SalesMessageSettings LIMIT 1');
+    } catch (err) {
+      console.log('Creating SalesMessageSettings table...');
+      await SalesMessageSettings.sync({ force: false });
+      console.log('SalesMessageSettings table created successfully');
+      
+      // Create default settings
+      await SalesMessageSettings.create({
+        firstMessageDelay: 7200000, // 2 hours
+        secondMessageDelay: 15552000000, // 6 months
+        isAutoSchedulingEnabled: false,
+        isAutoSendingEnabled: false
+      });
+    }
+    
+    try {
+      await sequelize.query('SELECT 1 FROM SalesMessageTemplates LIMIT 1');
+    } catch (err) {
+      console.log('Creating SalesMessageTemplates table...');
+      await SalesMessageTemplate.sync({ force: false });
+      console.log('SalesMessageTemplates table created successfully');
+      
+      // Create default templates
+      await SalesMessageTemplate.create({
+        content: 'Hello {name}, thank you for your purchase! How was your experience?',
+        messageType: 'FIRST'
+      });
+      
+      await SalesMessageTemplate.create({
+        content: 'Hello {name}, it\'s been a while since your last purchase. We miss you! Check out our latest products.',
+        messageType: 'SECOND'
+      });
+    }
+    
+    try {
+      await sequelize.query('SELECT 1 FROM SalesScheduledMessages LIMIT 1');
+    } catch (err) {
+      console.log('Creating SalesScheduledMessages table...');
+      await SalesScheduledMessage.sync({ force: false });
+      console.log('SalesScheduledMessages table created successfully');
+    }
+    
+    console.log('All required tables exist');
     return true;
   } catch (error) {
     console.error('Error creating/checking tables:', error);

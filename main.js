@@ -10,6 +10,7 @@ const fs = require('fs');
 const { promisify } = require('util');
 const readFileAsync = promisify(fs.readFile); // Use promisify instead of fs/promises for compatibility
 const salesApiController = require('./src/controllers/SalesApiController');
+const salesMessageController = require('./src/controllers/SalesMessageController');
 
 // Initialize the configuration store
 const store = new Store();
@@ -226,6 +227,10 @@ app.whenReady().then(async () => {
         // Start message scheduler with loaded settings
         await messageController.startScheduler();
         console.log('Message scheduler started successfully');
+        
+        // Start sales message scheduler for automated sales messaging
+        await salesMessageController.startScheduler();
+        console.log('Sales message scheduler started successfully');
       } catch (err) {
         console.error('Failed to start message scheduler:', err);
         if (mainWindow && !mainWindow.isDestroyed()) {
@@ -646,6 +651,9 @@ app.on('window-all-closed', function () {
 app.on('will-quit', async () => {
   // Stop message scheduler
   messageController.stopScheduler();
+  
+  // Stop sales message scheduler
+  salesMessageController.stopScheduler();
 
   // Disconnect WhatsApp if connected, but keep session data
   if (whatsAppService.getStatus().isConnected) {
@@ -1654,6 +1662,71 @@ ipcMain.handle('restart-whatsapp-service', async () => {
     return { success: true };
   } catch (error) {
     console.error('Error during manual WhatsApp service restart:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Add new handlers for sales message operations
+ipcMain.handle('get-sales-message-settings', async () => {
+  try {
+    return await salesApiController.getSalesMessageSettings();
+  } catch (error) {
+    console.error('Error in get-sales-message-settings handler:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('update-sales-message-settings', async (event, settingsData) => {
+  try {
+    return await salesApiController.updateSalesMessageSettings(settingsData);
+  } catch (error) {
+    console.error('Error in update-sales-message-settings handler:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-sales-message-templates', async () => {
+  try {
+    return await salesApiController.getSalesMessageTemplates();
+  } catch (error) {
+    console.error('Error in get-sales-message-templates handler:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('update-sales-message-template', async (event, type, templateData) => {
+  try {
+    return await salesApiController.updateSalesMessageTemplate(type, templateData);
+  } catch (error) {
+    console.error('Error in update-sales-message-template handler:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-scheduled-sales-messages', async (event, page, limit, status) => {
+  try {
+    return await salesApiController.getScheduledSalesMessages(page, limit, status);
+  } catch (error) {
+    console.error('Error in get-scheduled-sales-messages handler:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('delete-sales-messages', async (event, ids) => {
+  try {
+    return await salesApiController.deleteSalesMessages(ids);
+  } catch (error) {
+    console.error('Error in delete-sales-messages handler:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Process pending sales messages (manually triggered)
+ipcMain.handle('process-pending-sales-messages', async () => {
+  try {
+    return await salesMessageController.processPendingMessages();
+  } catch (error) {
+    console.error('Error in process-pending-sales-messages handler:', error);
     return { success: false, error: error.message };
   }
 });

@@ -147,6 +147,184 @@ async function runMigration() {
         console.log('Created SalesContacts table and indexes');
       }
 
+      // Check if SalesMessageSettings table exists
+      let needsSalesMessageSettingsTable = false;
+      try {
+        await sequelize.query('SELECT 1 FROM SalesMessageSettings LIMIT 1', { transaction });
+        console.log('SalesMessageSettings table already exists');
+      } catch (error) {
+        needsSalesMessageSettingsTable = true;
+        console.log('Need to create SalesMessageSettings table');
+      }
+
+      // Create SalesMessageSettings table if needed
+      if (needsSalesMessageSettingsTable) {
+        console.log('Creating SalesMessageSettings table...');
+        
+        await sequelize.query(`
+          CREATE TABLE IF NOT EXISTS SalesMessageSettings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            firstMessageDelay BIGINT NOT NULL DEFAULT 7200000,
+            secondMessageDelay BIGINT NOT NULL DEFAULT 15552000000,
+            isAutoSchedulingEnabled BOOLEAN DEFAULT 0,
+            isAutoSendingEnabled BOOLEAN DEFAULT 0,
+            createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `, { transaction });
+        
+        console.log('Created SalesMessageSettings table');
+        
+        // Insert default settings
+        await sequelize.query(`
+          INSERT INTO SalesMessageSettings (
+            firstMessageDelay, 
+            secondMessageDelay, 
+            isAutoSchedulingEnabled, 
+            isAutoSendingEnabled
+          ) VALUES (
+            7200000,
+            15552000000,
+            0,
+            0
+          )
+        `, { transaction });
+        
+        console.log('Inserted default SalesMessageSettings');
+      }
+      
+      // Check if SalesMessageTemplates table exists
+      let needsSalesMessageTemplatesTable = false;
+      try {
+        await sequelize.query('SELECT 1 FROM SalesMessageTemplates LIMIT 1', { transaction });
+        console.log('SalesMessageTemplates table already exists');
+        
+        // If the table exists, check if messageType column exists
+        try {
+          await sequelize.query('SELECT messageType FROM SalesMessageTemplates LIMIT 1', { transaction });
+          console.log('messageType column already exists in SalesMessageTemplates');
+        } catch (error) {
+          console.log('messageType column does not exist in SalesMessageTemplates, adding it...');
+          
+          // Add messageType column to the table
+          await sequelize.query(`
+            ALTER TABLE SalesMessageTemplates 
+            ADD COLUMN messageType VARCHAR(10) NOT NULL CHECK (messageType IN ('FIRST', 'SECOND')) DEFAULT 'FIRST'
+          `, { transaction });
+          
+          console.log('Added messageType column to SalesMessageTemplates');
+          
+          // Update existing records to have proper message types
+          console.log('Setting messageType for existing records...');
+          await sequelize.query(`
+            UPDATE SalesMessageTemplates SET messageType = 'FIRST' WHERE id = 1;
+            UPDATE SalesMessageTemplates SET messageType = 'SECOND' WHERE id = 2;
+          `, { transaction });
+          
+          console.log('Updated existing SalesMessageTemplates records with proper messageType values');
+        }
+      } catch (error) {
+        needsSalesMessageTemplatesTable = true;
+        console.log('Need to create SalesMessageTemplates table');
+      }
+      
+      // Create SalesMessageTemplates table if needed
+      if (needsSalesMessageTemplatesTable) {
+        console.log('Creating SalesMessageTemplates table...');
+        
+        await sequelize.query(`
+          CREATE TABLE IF NOT EXISTS SalesMessageTemplates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL DEFAULT 'Hello {name}, thank you for your purchase!',
+            imagePath VARCHAR(255),
+            messageType VARCHAR(10) NOT NULL CHECK (messageType IN ('FIRST', 'SECOND')) DEFAULT 'FIRST',
+            createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+          )
+        `, { transaction });
+        
+        console.log('Created SalesMessageTemplates table');
+        
+        // Insert default templates
+        await sequelize.query(`
+          INSERT INTO SalesMessageTemplates (
+            content, 
+            messageType
+          ) VALUES (
+            'Hello {name}, thank you for your purchase! How was your experience?',
+            'FIRST'
+          )
+        `, { transaction });
+        
+        await sequelize.query(`
+          INSERT INTO SalesMessageTemplates (
+            content, 
+            messageType
+          ) VALUES (
+            'Hello {name}, it''s been a while since your last purchase. We miss you! Check out our latest products.',
+            'SECOND'
+          )
+        `, { transaction });
+        
+        console.log('Inserted default SalesMessageTemplates');
+      }
+      
+      // Check if SalesScheduledMessages table exists
+      let needsSalesScheduledMessagesTable = false;
+      try {
+        await sequelize.query('SELECT 1 FROM SalesScheduledMessages LIMIT 1', { transaction });
+        console.log('SalesScheduledMessages table already exists');
+      } catch (error) {
+        needsSalesScheduledMessagesTable = true;
+        console.log('Need to create SalesScheduledMessages table');
+      }
+      
+      // Create SalesScheduledMessages table if needed
+      if (needsSalesScheduledMessagesTable) {
+        console.log('Creating SalesScheduledMessages table...');
+        
+        await sequelize.query(`
+          CREATE TABLE IF NOT EXISTS SalesScheduledMessages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            externalId VARCHAR(255),
+            status VARCHAR(20) NOT NULL CHECK (status IN ('SCHEDULED', 'PENDING', 'SENDING', 'SENT', 'DELIVERED', 'READ', 'FAILED', 'CANCELED')) DEFAULT 'SCHEDULED',
+            scheduledTime DATETIME NOT NULL,
+            sentTime DATETIME,
+            deliveredTime DATETIME,
+            readTime DATETIME,
+            messageSequence VARCHAR(10) NOT NULL CHECK (messageSequence IN ('FIRST', 'SECOND')) DEFAULT 'FIRST',
+            retryCount INTEGER DEFAULT 0,
+            failureReason TEXT,
+            contentSnapshot TEXT,
+            imagePathSnapshot VARCHAR(255),
+            SalesContactId INTEGER NOT NULL,
+            SalesMessageTemplateId INTEGER NOT NULL,
+            createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (SalesContactId) REFERENCES SalesContacts(id) ON DELETE CASCADE,
+            FOREIGN KEY (SalesMessageTemplateId) REFERENCES SalesMessageTemplates(id) ON DELETE CASCADE
+          )
+        `, { transaction });
+        
+        // Create indexes
+        await sequelize.query(
+          'CREATE INDEX IF NOT EXISTS sales_scheduled_message_status_idx ON SalesScheduledMessages (status)',
+          { transaction }
+        );
+        
+        await sequelize.query(
+          'CREATE INDEX IF NOT EXISTS sales_scheduled_message_contact_idx ON SalesScheduledMessages (SalesContactId)',
+          { transaction }
+        );
+        
+        await sequelize.query(
+          'CREATE INDEX IF NOT EXISTS sales_scheduled_message_scheduled_time_idx ON SalesScheduledMessages (scheduledTime)',
+          { transaction }
+        );
+        
+        console.log('Created SalesScheduledMessages table and indexes');
+      }
+
       console.log('Migration completed successfully!');
     });
 

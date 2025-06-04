@@ -77,6 +77,16 @@ function exposeAPI() {
       getAvailableCities: () => ipcRenderer.invoke('get-available-cities'),
       manualSalesRecovery: (startDate, endDate) => ipcRenderer.invoke('manual-sales-recovery', startDate, endDate),
       
+      // Sales message operations
+      getSalesMessageSettings: () => ipcRenderer.invoke('get-sales-message-settings'),
+      updateSalesMessageSettings: (settings) => ipcRenderer.invoke('update-sales-message-settings', settings),
+      getSalesMessageTemplates: () => ipcRenderer.invoke('get-sales-message-templates'),
+      updateSalesMessageTemplate: (type, template) => ipcRenderer.invoke('update-sales-message-template', type, template),
+      getScheduledSalesMessages: (page, limit, status) => ipcRenderer.invoke('get-scheduled-sales-messages', page, limit, status),
+      deleteSalesMessages: (ids) => ipcRenderer.invoke('delete-sales-messages', ids),
+      processPendingSalesMessages: () => ipcRenderer.invoke('process-pending-sales-messages'),
+      processPendingMessages: () => ipcRenderer.invoke('process-pending-sales-messages'),
+      
       // Message operations
       getScheduledMessages: (status) => ipcRenderer.invoke('get-scheduled-messages', status),
       getScheduledMessage: (id) => ipcRenderer.invoke('get-scheduled-message', id),
