@@ -715,8 +715,80 @@
           Next sync: <span id="next-sync-time">N/A</span>
         </div>
         
-        <div id="sync-stats-container" class="sync-stats-container">
-          <!-- Sync statistics will be populated here -->
+        <!-- Sales Contacts Section -->
+        <div class="sync-stats-container">
+          <div class="sync-stats-header">
+            <h3>Sync Statistics</h3>
+            <div class="status-container">
+              <div class="sync-status">
+                <span>Status:</span>
+                <div class="status-indicator" id="sync-status-indicator"></div>
+                <span id="sync-status-text">Checking...</span>
+              </div>
+              <div class="auto-refresh-info">
+                <span>Auto-refresh: </span>
+                <span id="refresh-countdown">60s</span>
+                <button id="refresh-sales-data" class="refresh-btn">
+                  <i class="fas fa-sync-alt"></i>
+                </button>
+              </div>
+              <button id="force-sync-btn" class="primary-btn small">
+                <i class="fas fa-sync"></i> Force Sync
+              </button>
+            </div>
+          </div>
+          <div class="stats-row">
+            <div class="stats-total">
+              <h4>Total Contacts</h4>
+              <span id="total-contacts-count">0</span>
+            </div>
+            <div class="stats-today">
+              <h4>Today's Contacts</h4>
+              <span id="today-contacts-count">0</span>
+            </div>
+          </div>
+          <div class="city-stats-container" id="city-stats">
+            <!-- City stats will be populated dynamically -->
+          </div>
+        </div>
+        
+        <!-- Contacts Table -->
+        <div class="section-header">
+          <h3>Sales Contacts</h3>
+          <div class="table-actions">
+            <button id="delete-selected-sales" class="danger-btn" disabled>
+              <i class="fas fa-trash"></i> Delete Selected
+            </button>
+            <button id="delete-all-sales" class="danger-btn">
+              <i class="fas fa-trash-alt"></i> Delete All
+            </button>
+          </div>
+        </div>
+        <div class="contacts-table-container">
+          <table id="sales-contacts-table" class="data-table">
+            <thead>
+              <tr>
+                <th width="30px">
+                  <input type="checkbox" id="select-all-sales-contacts">
+                </th>
+                <th data-sort="name">Name</th>
+                <th data-sort="phoneNumber">Phone</th>
+                <th data-sort="code">Code</th>
+                <th data-sort="city">City</th>
+                <th data-sort="documentNumber">Document #</th>
+                <th data-sort="documentDate">Document Date</th>
+                <th data-sort="createdAt">Created At</th>
+                <th width="50px">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="sales-contacts-tbody">
+              <!-- Sales contacts will be loaded here -->
+            </tbody>
+          </table>
+        </div>
+        
+        <div id="sales-pagination" class="pagination-container">
+          <!-- Pagination will be added dynamically -->
         </div>
         
         <!-- Sales Auto-Message Settings Section -->
@@ -728,8 +800,8 @@
               <div class="form-group">
                 <label for="first-message-delay">First Message Delay:</label>
                 <div class="time-input-container">
-                  <input type="number" id="first-message-delay-value" min="1" class="form-control">
-                  <select id="first-message-delay-unit" class="form-control">
+                  <input type="number" id="first-message-delay" min="1">
+                  <select id="first-message-delay-unit">
                     <option value="1000">Seconds</option>
                     <option value="60000">Minutes</option>
                     <option value="3600000" selected>Hours</option>
@@ -742,8 +814,8 @@
               <div class="form-group">
                 <label for="second-message-delay">Second Message Delay:</label>
                 <div class="time-input-container">
-                  <input type="number" id="second-message-delay-value" min="1" class="form-control">
-                  <select id="second-message-delay-unit" class="form-control">
+                  <input type="number" id="second-message-delay" min="1">
+                  <select id="second-message-delay-unit">
                     <option value="1000">Seconds</option>
                     <option value="60000">Minutes</option>
                     <option value="3600000">Hours</option>
@@ -787,66 +859,34 @@
                 
                 <div class="template-content">
                   <!-- First Message Template -->
-                  <div class="template-pane active" id="first-message-pane">
-                    <div class="form-group">
-                      <label for="first-message-content">Message Content:</label>
-                      <textarea id="first-message-content" class="form-control" rows="6"></textarea>
-                      <small class="variables-help">
-                        Available variables: {name}, {phone}, {code}, {city}, {documentNumber}
-                      </small>
-                    </div>
-                    <div class="form-group">
-                      <label>Message Image (Optional):</label>
-                      <div class="image-preview" id="first-message-image-preview">
-                        <div class="placeholder">
-                          <i class="fas fa-image"></i>
-                          <p>No image selected</p>
-                        </div>
-                        <img src="" alt="Preview" style="display: none;">
-                        <button id="first-message-remove-image" class="remove-image" style="display: none;">
-                          <i class="fas fa-times"></i>
+                  <div id="first-message-pane" class="template-pane active">
+                    <div class="template-form">
+                      <div class="form-group">
+                        <label for="first-message-content">Message Content:</label>
+                        <textarea id="first-message-content" rows="8" placeholder="Enter the first message template..."></textarea>
+                        <small class="text-muted">Use {name} for customer name, {phone} for phone, {date} for purchase date.</small>
+                      </div>
+                      <div class="form-actions">
+                        <button id="save-first-message-template" class="primary-btn">
+                          <i class="fas fa-save"></i> Save Template
                         </button>
                       </div>
-                      <button id="first-message-select-image" class="secondary-btn">
-                        <i class="fas fa-upload"></i> Select Image
-                      </button>
-                    </div>
-                    <div class="form-actions">
-                      <button id="save-first-message-template" class="primary-btn">
-                        <i class="fas fa-save"></i> Save Template
-                      </button>
                     </div>
                   </div>
                   
                   <!-- Second Message Template -->
-                  <div class="template-pane" id="second-message-pane">
-                    <div class="form-group">
-                      <label for="second-message-content">Message Content:</label>
-                      <textarea id="second-message-content" class="form-control" rows="6"></textarea>
-                      <small class="variables-help">
-                        Available variables: {name}, {phone}, {code}, {city}, {documentNumber}
-                      </small>
-                    </div>
-                    <div class="form-group">
-                      <label>Message Image (Optional):</label>
-                      <div class="image-preview" id="second-message-image-preview">
-                        <div class="placeholder">
-                          <i class="fas fa-image"></i>
-                          <p>No image selected</p>
-                        </div>
-                        <img src="" alt="Preview" style="display: none;">
-                        <button id="second-message-remove-image" class="remove-image" style="display: none;">
-                          <i class="fas fa-times"></i>
+                  <div id="second-message-pane" class="template-pane">
+                    <div class="template-form">
+                      <div class="form-group">
+                        <label for="second-message-content">Message Content:</label>
+                        <textarea id="second-message-content" rows="8" placeholder="Enter the second message template..."></textarea>
+                        <small class="text-muted">Use {name} for customer name, {phone} for phone, {date} for purchase date.</small>
+                      </div>
+                      <div class="form-actions">
+                        <button id="save-second-message-template" class="primary-btn">
+                          <i class="fas fa-save"></i> Save Template
                         </button>
                       </div>
-                      <button id="second-message-select-image" class="secondary-btn">
-                        <i class="fas fa-upload"></i> Select Image
-                      </button>
-                    </div>
-                    <div class="form-actions">
-                      <button id="save-second-message-template" class="primary-btn">
-                        <i class="fas fa-save"></i> Save Template
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -856,35 +896,37 @@
           
           <!-- Scheduled Messages Section -->
           <div class="sales-scheduled-messages">
-            <h4>Scheduled Messages</h4>
-            <div class="action-bar">
-              <div class="filter-container">
-                <label for="sales-message-status-filter">Status:</label>
-                <select id="sales-message-status-filter" class="form-control">
-                  <option value="">All Statuses</option>
-                  <option value="SCHEDULED">Scheduled</option>
-                  <option value="PENDING">Pending</option>
-                  <option value="SENT">Sent</option>
-                  <option value="DELIVERED">Delivered</option>
-                  <option value="READ">Read</option>
-                  <option value="FAILED">Failed</option>
-                  <option value="CANCELED">Canceled</option>
-                </select>
+            <div class="section-header">
+              <h4>Scheduled Messages</h4>
+              <div class="message-actions">
+                <button id="process-pending-messages" class="primary-btn small">
+                  <i class="fas fa-play"></i> Process Pending
+                </button>
+                <button id="delete-selected-sales-messages" class="danger-btn small" disabled>
+                  <i class="fas fa-trash-alt"></i> Delete Selected
+                </button>
+                <button id="delete-all-sales-messages" class="danger-btn small">
+                  <i class="fas fa-trash-alt"></i> Delete All
+                </button>
               </div>
-              <div class="filter-container">
-                <label for="sales-message-sequence-filter">Type:</label>
-                <select id="sales-message-sequence-filter" class="form-control">
-                  <option value="">All Types</option>
-                  <option value="FIRST">First Message</option>
-                  <option value="SECOND">Second Message</option>
-                </select>
-              </div>
-              <button id="process-pending-sales-messages" class="primary-btn">
-                <i class="fas fa-paper-plane"></i> Process Pending
-              </button>
-              <button id="delete-selected-sales-messages" class="danger-btn" disabled>
-                <i class="fas fa-trash"></i> Delete Selected
-              </button>
+            </div>
+            <div class="filter-container">
+              <label for="sales-message-status-filter">Status:</label>
+              <select id="sales-message-status-filter">
+                <option value="">All</option>
+                <option value="SCHEDULED">Scheduled</option>
+                <option value="PENDING">Pending</option>
+                <option value="SENT">Sent</option>
+                <option value="DELIVERED">Delivered</option>
+                <option value="READ">Read</option>
+                <option value="FAILED">Failed</option>
+              </select>
+              <label for="sales-message-sequence-filter">Type:</label>
+              <select id="sales-message-sequence-filter">
+                <option value="">All</option>
+                <option value="FIRST">First Message</option>
+                <option value="SECOND">Second Message</option>
+              </select>
             </div>
             
             <div class="messages-container">
@@ -913,33 +955,6 @@
               <!-- Pagination will be added dynamically -->
             </div>
           </div>
-        </div>
-        
-        <div class="contacts-table-container">
-          <table id="sales-contacts-table" class="data-table">
-            <thead>
-              <tr>
-                <th width="30px">
-                  <input type="checkbox" id="select-all-sales-contacts">
-                </th>
-                <th data-sort="name">Name</th>
-                <th data-sort="phoneNumber">Phone</th>
-                <th data-sort="code">Code</th>
-                <th data-sort="city">City</th>
-                <th data-sort="documentNumber">Document #</th>
-                <th data-sort="documentDate">Document Date</th>
-                <th data-sort="createdAt">Created At</th>
-                <th width="50px">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="sales-contacts-tbody">
-              <!-- Sales contacts will be loaded here -->
-            </tbody>
-          </table>
-        </div>
-        
-        <div id="sales-pagination" class="pagination-container">
-          <!-- Pagination will be added dynamically -->
         </div>
         
         <!-- Delete Confirmation Modal -->

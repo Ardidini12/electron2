@@ -10,6 +10,9 @@ let templates = { FIRST: null, SECOND: null };
 let settings = null;
 let currentActiveTab = 'first-message';
 
+// Track selected messages
+let selectedMessages = new Set();
+
 /**
  * Initialize the sales messages module
  */
@@ -20,14 +23,20 @@ export async function initSalesMessages() {
     // Cache DOM elements
     cacheElements();
     
-    // Load settings and templates
-    await Promise.all([
-      loadSalesMessageSettings(),
-      loadSalesMessageTemplates()
-    ]);
-    
-    // Set up event listeners
+    // Setup event listeners
     setupEventListeners();
+    
+    // Setup message status updates
+    setupMessageStatusUpdates();
+    
+    // Load sales message settings
+    await loadSalesMessageSettings();
+    
+    // Load sales message templates
+    await loadSalesMessageTemplates();
+    
+    // Setup periodic refresh of scheduled messages
+    setInterval(loadScheduledMessages, 60000); // Refresh every minute
     
     console.log('Sales messages module initialized successfully');
     return true;
@@ -42,41 +51,59 @@ export async function initSalesMessages() {
  * Cache DOM elements for better performance
  */
 function cacheElements() {
-  // Settings elements
-  elements.firstMessageDelayValue = document.getElementById('first-message-delay-value');
-  elements.firstMessageDelayUnit = document.getElementById('first-message-delay-unit');
-  elements.secondMessageDelayValue = document.getElementById('second-message-delay-value');
-  elements.secondMessageDelayUnit = document.getElementById('second-message-delay-unit');
-  elements.autoSchedulingEnabled = document.getElementById('auto-scheduling-enabled');
-  elements.autoSendingEnabled = document.getElementById('auto-sending-enabled');
-  elements.saveSettingsBtn = document.getElementById('save-sales-message-settings');
-  
-  // Template elements
-  elements.templateTabs = document.querySelectorAll('.template-tab');
-  elements.templatePanes = document.querySelectorAll('.template-pane');
-  elements.firstMessageContent = document.getElementById('first-message-content');
-  elements.firstMessageImagePreview = document.getElementById('first-message-image-preview');
-  elements.firstMessageImagePreviewImg = elements.firstMessageImagePreview?.querySelector('img');
-  elements.firstMessageRemoveImageBtn = document.getElementById('first-message-remove-image');
-  elements.firstMessageSelectImageBtn = document.getElementById('first-message-select-image');
-  elements.saveFirstMessageTemplateBtn = document.getElementById('save-first-message-template');
-  
-  elements.secondMessageContent = document.getElementById('second-message-content');
-  elements.secondMessageImagePreview = document.getElementById('second-message-image-preview');
-  elements.secondMessageImagePreviewImg = elements.secondMessageImagePreview?.querySelector('img');
-  elements.secondMessageRemoveImageBtn = document.getElementById('second-message-remove-image');
-  elements.secondMessageSelectImageBtn = document.getElementById('second-message-select-image');
-  elements.saveSecondMessageTemplateBtn = document.getElementById('save-second-message-template');
-  
-  // Scheduled messages elements
-  elements.processPendingMessagesBtn = document.getElementById('process-pending-sales-messages');
-  elements.salesMessageStatusFilter = document.getElementById('sales-message-status-filter');
-  elements.salesMessageSequenceFilter = document.getElementById('sales-message-sequence-filter');
-  elements.salesMessagesTable = document.getElementById('sales-messages-table');
-  elements.salesMessagesBody = document.getElementById('sales-messages-tbody');
-  elements.salesMessagesPagination = document.getElementById('sales-messages-pagination');
-  elements.deleteSelectedMessagesBtn = document.getElementById('delete-selected-sales-messages');
-  elements.selectAllMessagesCheckbox = document.getElementById('select-all-sales-messages');
+  elements = {
+    // Tabs
+    templatesTab: document.getElementById('templates-tab'),
+    messagesTab: document.getElementById('messages-tab'),
+    
+    // Sales message settings
+    salesMessageSettings: document.getElementById('sales-message-settings'),
+    firstMessageDelay: document.getElementById('first-message-delay'),
+    firstMessageDelayUnit: document.getElementById('first-message-delay-unit'),
+    secondMessageDelay: document.getElementById('second-message-delay'),
+    secondMessageDelayUnit: document.getElementById('second-message-delay-unit'),
+    autoSchedulingEnabled: document.getElementById('auto-scheduling-enabled'),
+    autoSendingEnabled: document.getElementById('auto-sending-enabled'),
+    saveSettingsBtn: document.getElementById('save-sales-message-settings'),
+    
+    // Template tabs
+    templateTabs: document.querySelectorAll('.template-tab'),
+    templateContent: document.querySelectorAll('.template-pane'),
+    
+    // First message template
+    firstMessageTab: document.getElementById('first-message-tab'),
+    firstMessagePane: document.getElementById('first-message-pane'),
+    firstMessageContent: document.getElementById('first-message-content'),
+    firstMessageImage: document.getElementById('first-message-image'),
+    firstMessageSelectImageBtn: document.getElementById('first-message-select-image'),
+    firstMessageRemoveImageBtn: document.getElementById('first-message-remove-image'),
+    firstMessageImagePreview: document.getElementById('first-message-image-preview'),
+    saveFirstMessageTemplateBtn: document.getElementById('save-first-message-template'),
+    
+    // Second message template
+    secondMessageTab: document.getElementById('second-message-tab'),
+    secondMessagePane: document.getElementById('second-message-pane'),
+    secondMessageContent: document.getElementById('second-message-content'),
+    secondMessageImage: document.getElementById('second-message-image'),
+    secondMessageSelectImageBtn: document.getElementById('second-message-select-image'),
+    secondMessageRemoveImageBtn: document.getElementById('second-message-remove-image'),
+    secondMessageImagePreview: document.getElementById('second-message-image-preview'),
+    saveSecondMessageTemplateBtn: document.getElementById('save-second-message-template'),
+    
+    // Scheduled messages
+    processPendingMessagesBtn: document.getElementById('process-pending-messages'),
+    salesMessagesTable: document.getElementById('sales-messages-table'),
+    salesMessagesBody: document.getElementById('sales-messages-tbody'),
+    
+    // Filters
+    salesMessageStatusFilter: document.getElementById('sales-message-status-filter'),
+    salesMessageSequenceFilter: document.getElementById('sales-message-sequence-filter'),
+    
+    // Select all and delete buttons
+    selectAllMessagesCheckbox: document.getElementById('select-all-sales-messages'),
+    deleteSelectedMessagesBtn: document.getElementById('delete-selected-sales-messages'),
+    deleteAllMessagesBtn: document.getElementById('delete-all-sales-messages')
+  };
 }
 
 /**
@@ -235,8 +262,25 @@ function setupEventListeners() {
   // Load scheduled messages on page load
   loadScheduledMessages();
   
-  // Refresh scheduled messages periodically (every 30 seconds)
-  setInterval(loadScheduledMessages, 30000);
+  // Add event listener for select all checkbox
+  if (elements.selectAllMessagesCheckbox) {
+    elements.selectAllMessagesCheckbox.addEventListener('change', toggleSelectAllMessages);
+  }
+  
+  // Add event listener for delete selected messages button
+  if (elements.deleteSelectedMessagesBtn) {
+    elements.deleteSelectedMessagesBtn.addEventListener('click', () => {
+      confirmDeleteMultipleMessages('selected');
+    });
+  }
+  
+  // Add event listener for delete all messages button if it exists
+  const deleteAllMessagesBtn = document.getElementById('delete-all-sales-messages');
+  if (deleteAllMessagesBtn) {
+    deleteAllMessagesBtn.addEventListener('click', () => {
+      confirmDeleteMultipleMessages('all');
+    });
+  }
 }
 
 /**
@@ -523,30 +567,26 @@ async function loadSalesMessageTemplates() {
       throw new Error(response?.error || 'Failed to load sales message templates');
     }
     
-    // Process templates
-    if (response.templates && Array.isArray(response.templates)) {
-      // Extract first and second message templates
-      for (const template of response.templates) {
-        if (template.messageType === 'FIRST') {
-          templates.FIRST = template;
-          console.log('Loaded FIRST template:', template.content);
-        } else if (template.messageType === 'SECOND') {
-          templates.SECOND = template;
-          console.log('Loaded SECOND template:', template.content);
-        }
-      }
-    }
+    // Store templates in a more accessible way
+    templates = {
+      FIRST: response.templates.find(t => t.messageType === 'FIRST') || null,
+      SECOND: response.templates.find(t => t.messageType === 'SECOND') || null
+    };
     
     console.log('Loaded templates:', templates);
     
-    // Update UI with the loaded templates
+    // Update the UI with loaded templates
     updateTemplatesUI();
     
     return templates;
   } catch (error) {
     console.error('Error loading sales message templates:', error);
-    showNotification('Failed to load sales message templates: ' + error.message, 'error');
-    return null;
+    showNotification('Failed to load message templates: ' + error.message, 'error');
+    
+    // Initialize empty templates if needed
+    templates = templates || { FIRST: null, SECOND: null };
+    
+    return templates;
   }
 }
 
@@ -569,7 +609,7 @@ function switchTemplateTab(tabName) {
   });
   
   // Update tab panes
-  elements.templatePanes.forEach(pane => {
+  elements.templateContent.forEach(pane => {
     if (pane.id === `${tabName}-pane`) {
       pane.classList.add('active');
     } else {
@@ -579,208 +619,97 @@ function switchTemplateTab(tabName) {
 }
 
 /**
- * Update the templates UI with current values
+ * Update templates UI with current template data
  */
 function updateTemplatesUI() {
-  console.log('Updating templates UI with:', templates);
-  
-  // First message template
-  if (elements.firstMessageContent) {
-    if (templates.FIRST) {
-      // Handle both direct values and Sequelize objects with dataValues
-      const content = templates.FIRST.dataValues 
-        ? templates.FIRST.dataValues.content 
-        : templates.FIRST.content;
-        
-      if (content) {
-        elements.firstMessageContent.value = content;
-        console.log('Set first message content to:', content);
-      } else {
-        elements.firstMessageContent.value = '';
-        console.log('No content for first message template');
-      }
-    } else {
-      elements.firstMessageContent.value = '';
-      console.log('No FIRST template available');
-    }
-  } else {
-    console.log('firstMessageContent element not found in DOM');
+  // Update First Message template UI
+  if (elements.firstMessageContent && templates.FIRST) {
+    elements.firstMessageContent.value = templates.FIRST.content || '';
   }
   
-  // Image for first message template
-  const firstImagePath = templates.FIRST && (templates.FIRST.dataValues 
-    ? templates.FIRST.dataValues.imagePath 
-    : templates.FIRST.imagePath);
-    
-  if (firstImagePath && elements.firstMessageImagePreview && elements.firstMessageImagePreviewImg) {
-    // Show image preview
-    elements.firstMessageImagePreviewImg.src = `file://${firstImagePath}`;
-    elements.firstMessageImagePreviewImg.style.display = 'block';
-    
-    // Show remove button
-    if (elements.firstMessageRemoveImageBtn) {
-      elements.firstMessageRemoveImageBtn.style.display = 'block';
-    }
-    
-    // Hide placeholder
-    const placeholder = elements.firstMessageImagePreview.querySelector('.placeholder');
-    if (placeholder) {
-      placeholder.style.display = 'none';
-    }
-  } else if (elements.firstMessageImagePreview) {
-    // Hide image preview
-    if (elements.firstMessageImagePreviewImg) {
-      elements.firstMessageImagePreviewImg.style.display = 'none';
-    }
-    
-    // Hide remove button
-    if (elements.firstMessageRemoveImageBtn) {
-      elements.firstMessageRemoveImageBtn.style.display = 'none';
-    }
-    
-    // Show placeholder
-    const placeholder = elements.firstMessageImagePreview.querySelector('.placeholder');
-    if (placeholder) {
-      placeholder.style.display = 'flex';
-    }
-  }
-  
-  // Second message template
-  if (elements.secondMessageContent) {
-    if (templates.SECOND) {
-      // Handle both direct values and Sequelize objects with dataValues
-      const content = templates.SECOND.dataValues 
-        ? templates.SECOND.dataValues.content 
-        : templates.SECOND.content;
-        
-      if (content) {
-        elements.secondMessageContent.value = content;
-        console.log('Set second message content to:', content);
-      } else {
-        elements.secondMessageContent.value = '';
-        console.log('No content for second message template');
-      }
-    } else {
-      elements.secondMessageContent.value = '';
-      console.log('No SECOND template available');
-    }
-  } else {
-    console.log('secondMessageContent element not found in DOM');
-  }
-  
-  // Image for second message template
-  const secondImagePath = templates.SECOND && (templates.SECOND.dataValues 
-    ? templates.SECOND.dataValues.imagePath 
-    : templates.SECOND.imagePath);
-    
-  if (secondImagePath && elements.secondMessageImagePreview && elements.secondMessageImagePreviewImg) {
-    // Show image preview
-    elements.secondMessageImagePreviewImg.src = `file://${secondImagePath}`;
-    elements.secondMessageImagePreviewImg.style.display = 'block';
-    
-    // Show remove button
-    if (elements.secondMessageRemoveImageBtn) {
-      elements.secondMessageRemoveImageBtn.style.display = 'block';
-    }
-    
-    // Hide placeholder
-    const placeholder = elements.secondMessageImagePreview.querySelector('.placeholder');
-    if (placeholder) {
-      placeholder.style.display = 'none';
-    }
-  } else if (elements.secondMessageImagePreview) {
-    // Hide image preview
-    if (elements.secondMessageImagePreviewImg) {
-      elements.secondMessageImagePreviewImg.style.display = 'none';
-    }
-    
-    // Hide remove button
-    if (elements.secondMessageRemoveImageBtn) {
-      elements.secondMessageRemoveImageBtn.style.display = 'none';
-    }
-    
-    // Show placeholder
-    const placeholder = elements.secondMessageImagePreview.querySelector('.placeholder');
-    if (placeholder) {
-      placeholder.style.display = 'flex';
-    }
+  // Update Second Message template UI
+  if (elements.secondMessageContent && templates.SECOND) {
+    elements.secondMessageContent.value = templates.SECOND.content || '';
   }
 }
 
 /**
- * Save message template to the backend
- * @param {string} type - Template type (FIRST or SECOND)
+ * Save a message template
+ * @param {string} type - Message type (FIRST or SECOND)
  */
 async function saveMessageTemplate(type) {
   try {
-    // Get the appropriate button
-    const saveBtn = type === 'FIRST' ? elements.saveFirstMessageTemplateBtn : elements.saveSecondMessageTemplateBtn;
+    console.log(`Saving ${type} message template`);
     
-    // Disable the save button
-    if (saveBtn) {
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-    }
-    
-    // Get content from the appropriate textarea
+    // Get appropriate content element based on type
     const contentElement = type === 'FIRST' 
       ? elements.firstMessageContent
       : elements.secondMessageContent;
-    
-    const content = contentElement?.value;
-    
-    if (!content) {
-      throw new Error('Message content is required');
+      
+    if (!contentElement) {
+      throw new Error(`Content element not found for ${type} message`);
     }
     
-    // Store content in a variable in case we need to restore it
-    const originalContent = content;
+    // Get content
+    const content = contentElement.value.trim();
     
-    // Get current template
-    const template = templates[type] || {};
+    // Validate content
+    if (!content) {
+      throw new Error('Message content cannot be empty');
+    }
     
-    // Create a new template object to avoid reference issues
+    // Show loading state
+    const saveButton = type === 'FIRST'
+      ? elements.saveFirstMessageTemplateBtn
+      : elements.saveSecondMessageTemplateBtn;
+      
+    if (saveButton) {
+      saveButton.disabled = true;
+      saveButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+    }
+    
+    // Send to backend - removing image support
     const templateData = {
-      content: content,
-      imagePath: template.imagePath || null
+      content
     };
     
-    console.log(`Saving ${type} template:`, templateData);
+    const result = await window.api.updateSalesMessageTemplate(type, templateData);
     
-    // Send to backend
-    const response = await window.api.updateSalesMessageTemplate(type, templateData);
-    
-    if (!response || !response.success) {
-      throw new Error(response?.error || `Failed to save ${type} message template`);
+    if (!result || !result.success) {
+      throw new Error(result?.error || 'Failed to save template');
     }
     
-    console.log(`Template saved successfully:`, response.template);
+    // Show success notification
+    showNotification(`${type} message template saved successfully`, 'success');
     
-    // Update local template with the response data
-    templates[type] = response.template;
-    
-    // Manually ensure the content is set in the UI
-    if (contentElement) {
-      contentElement.value = response.template.content || originalContent;
+    // Restore button state
+    if (saveButton) {
+      saveButton.disabled = false;
+      saveButton.innerHTML = '<i class="fas fa-save"></i> Save Template';
     }
     
-    // Make sure to update the UI with the saved template
-    updateTemplatesUI();
+    console.log(`${type} message template saved:`, result);
     
-    showNotification(`${type.toLowerCase()} message template saved successfully`, 'success');
-    
-    return true;
+    // Return the result
+    return result;
   } catch (error) {
     console.error(`Error saving ${type} message template:`, error);
-    showNotification(`Failed to save ${type.toLowerCase()} message template: ${error.message}`, 'error');
-    return false;
-  } finally {
-    // Re-enable the save button
-    const saveBtn = type === 'FIRST' ? elements.saveFirstMessageTemplateBtn : elements.saveSecondMessageTemplateBtn;
-    if (saveBtn) {
-      saveBtn.disabled = false;
-      saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Template';
+    showNotification(`Error: ${error.message}`, 'error');
+    
+    // Restore button state for the appropriate button
+    const saveButton = type === 'FIRST'
+      ? elements.saveFirstMessageTemplateBtn
+      : elements.saveSecondMessageTemplateBtn;
+      
+    if (saveButton) {
+      saveButton.disabled = false;
+      saveButton.innerHTML = '<i class="fas fa-save"></i> Save Template';
     }
+    
+    return {
+      success: false,
+      error: error.message
+    };
   }
 }
 
@@ -932,6 +861,11 @@ async function loadScheduledMessages() {
       messageRow.className = `message-row ${message.status.toLowerCase()}`;
       messageRow.dataset.id = message.id;
       
+      // Add externalId to dataset if it exists
+      if (message.externalId) {
+        messageRow.dataset.externalId = message.externalId;
+      }
+      
       messageRow.innerHTML = `
         <td>
           <input type="checkbox" class="select-message" data-id="${message.id}">
@@ -977,6 +911,14 @@ async function loadScheduledMessages() {
         confirmDeleteMessage(messageId);
       });
     });
+    
+    // Clear selected messages when loading new data
+    selectedMessages.clear();
+    updateDeleteMessagesButton();
+    
+    // After adding message rows to container
+    // Add click handlers for checkboxes
+    setupMessageCheckboxListeners();
     
     return true;
   } catch (error) {
@@ -1142,4 +1084,312 @@ function confirmDeleteMessage(messageId) {
       });
     }
   }
+}
+
+/**
+ * Toggle select all messages
+ */
+function toggleSelectAllMessages() {
+  if (!elements.selectAllMessagesCheckbox) return;
+  
+  const isChecked = elements.selectAllMessagesCheckbox.checked;
+  console.log('Toggle select all messages:', isChecked);
+  
+  // Get all message checkboxes
+  const checkboxes = document.querySelectorAll('.select-message');
+  
+  // Clear selected messages if unchecking all
+  if (!isChecked) {
+    selectedMessages.clear();
+  }
+  
+  // Update all checkboxes
+  checkboxes.forEach(checkbox => {
+    checkbox.checked = isChecked;
+    
+    const id = parseInt(checkbox.dataset.id);
+    if (isChecked) {
+      selectedMessages.add(id);
+    } else {
+      selectedMessages.delete(id);
+    }
+    
+    // Update row styling
+    const row = checkbox.closest('tr');
+    if (row) {
+      if (isChecked) {
+        row.classList.add('selected');
+      } else {
+        row.classList.remove('selected');
+      }
+    }
+  });
+  
+  console.log(`Selected messages after toggle: ${selectedMessages.size}`);
+  
+  // Update the delete button state
+  updateDeleteMessagesButton();
+}
+
+/**
+ * Update the state of the select all checkbox
+ */
+function updateSelectAllCheckbox() {
+  if (!elements.selectAllMessagesCheckbox) return;
+  
+  const checkboxes = document.querySelectorAll('.select-message');
+  const checkedCount = document.querySelectorAll('.select-message:checked').length;
+  
+  if (checkboxes.length === 0) {
+    elements.selectAllMessagesCheckbox.checked = false;
+    elements.selectAllMessagesCheckbox.indeterminate = false;
+  } else if (checkedCount === 0) {
+    elements.selectAllMessagesCheckbox.checked = false;
+    elements.selectAllMessagesCheckbox.indeterminate = false;
+  } else if (checkedCount === checkboxes.length) {
+    elements.selectAllMessagesCheckbox.checked = true;
+    elements.selectAllMessagesCheckbox.indeterminate = false;
+  } else {
+    elements.selectAllMessagesCheckbox.checked = false;
+    elements.selectAllMessagesCheckbox.indeterminate = true;
+  }
+}
+
+/**
+ * Update the state of the delete selected messages button
+ */
+function updateDeleteMessagesButton() {
+  if (!elements.deleteSelectedMessagesBtn) return;
+  elements.deleteSelectedMessagesBtn.disabled = selectedMessages.size === 0;
+  
+  // Update button text with count
+  if (selectedMessages.size > 0) {
+    elements.deleteSelectedMessagesBtn.textContent = `Delete Selected (${selectedMessages.size})`;
+  } else {
+    elements.deleteSelectedMessagesBtn.textContent = 'Delete Selected';
+  }
+}
+
+/**
+ * Setup message checkbox listeners
+ */
+function setupMessageCheckboxListeners() {
+  const checkboxes = document.querySelectorAll('.select-message');
+  
+  checkboxes.forEach(checkbox => {
+    checkbox.addEventListener('change', () => {
+      const id = parseInt(checkbox.dataset.id);
+      
+      if (checkbox.checked) {
+        selectedMessages.add(id);
+      } else {
+        selectedMessages.delete(id);
+      }
+      
+      // Update row styling
+      const row = checkbox.closest('tr');
+      if (row) {
+        if (checkbox.checked) {
+          row.classList.add('selected');
+        } else {
+          row.classList.remove('selected');
+        }
+      }
+      
+      // Update the select all checkbox state
+      updateSelectAllCheckbox();
+      
+      // Update the delete button state
+      updateDeleteMessagesButton();
+    });
+  });
+}
+
+/**
+ * Confirm deletion of multiple messages
+ * @param {string} type - Type of deletion ('selected' or 'all')
+ */
+function confirmDeleteMultipleMessages(type) {
+  const modal = document.getElementById('delete-sales-messages-modal');
+  const message = document.getElementById('delete-sales-messages-message');
+  
+  if (!modal || !message) return;
+  
+  // Clear any existing event listeners
+  const closeButtons = modal.querySelectorAll('.close-modal');
+  closeButtons.forEach(btn => {
+    const newBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(newBtn, btn);
+  });
+  
+  const confirmBtn = document.getElementById('confirm-delete-sales-messages');
+  if (confirmBtn) {
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+    
+    // Add event listener to the new confirm button
+    const newConfirmBtnElement = document.getElementById('confirm-delete-sales-messages');
+    if (newConfirmBtnElement) {
+      newConfirmBtnElement.addEventListener('click', () => {
+        deleteMultipleMessages(type);
+      });
+    }
+  }
+  
+  if (type === 'selected') {
+    message.textContent = `Are you sure you want to delete ${selectedMessages.size} selected messages?`;
+  } else {
+    message.textContent = 'Are you sure you want to delete ALL scheduled messages? This action cannot be undone.';
+  }
+  
+  // Set the delete type
+  modal.dataset.deleteType = type;
+  
+  // Show the modal
+  modal.classList.add('visible');
+  
+  // Add close event listeners
+  const newCloseButtons = modal.querySelectorAll('.close-modal');
+  newCloseButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      modal.classList.remove('visible');
+    });
+  });
+}
+
+/**
+ * Delete multiple messages
+ * @param {string} type - Type of deletion ('selected' or 'all')
+ */
+async function deleteMultipleMessages(type) {
+  const modal = document.getElementById('delete-sales-messages-modal');
+  if (!modal) return;
+  
+  // Disable confirm button to prevent double clicks
+  const confirmBtn = document.getElementById('confirm-delete-sales-messages');
+  if (confirmBtn) {
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+  }
+  
+  try {
+    let result;
+    
+    if (type === 'selected' && selectedMessages.size > 0) {
+      console.log(`Deleting ${selectedMessages.size} selected messages`);
+      
+      // Convert Set to Array for the API call
+      const selectedIds = Array.from(selectedMessages);
+      result = await window.api.deleteSalesMessages(selectedIds);
+    } else if (type === 'all') {
+      console.log('Deleting all scheduled messages');
+      
+      // Get all message IDs from the table
+      const messageIds = [];
+      const messageRows = document.querySelectorAll('.message-row');
+      messageRows.forEach(row => {
+        const id = parseInt(row.dataset.id);
+        if (!isNaN(id)) {
+          messageIds.push(id);
+        }
+      });
+      
+      if (messageIds.length === 0) {
+        throw new Error('No messages found to delete');
+      }
+      
+      console.log(`Found ${messageIds.length} messages to delete`);
+      result = await window.api.deleteSalesMessages(messageIds);
+    } else {
+      throw new Error('Invalid delete type or no messages selected');
+    }
+    
+    if (!result || !result.success) {
+      throw new Error(result?.error || 'Failed to delete messages');
+    }
+    
+    console.log('Delete result:', result);
+    
+    // Show success notification
+    const count = result.count || 0;
+    const message = `Successfully deleted ${count} message${count !== 1 ? 's' : ''}`;
+    showNotification(message, 'success');
+    
+    // Clear selected messages
+    selectedMessages.clear();
+    
+    // Close the modal
+    modal.classList.remove('visible');
+    
+    // Reload the messages
+    await loadScheduledMessages();
+  } catch (error) {
+    console.error('Error deleting messages:', error);
+    showNotification('Error: ' + error.message, 'error');
+    
+    // Re-enable the confirm button
+    if (confirmBtn) {
+      confirmBtn.disabled = false;
+      confirmBtn.textContent = 'Delete';
+    }
+  }
+}
+
+/**
+ * Update the status of a message in the UI
+ * @param {Object} update - Status update object
+ */
+function updateMessageStatus(update) {
+  if (!update || !update.externalId) {
+    console.warn('Invalid status update received:', update);
+    return;
+  }
+  
+  console.log(`[Sales] Received status update: ${update.externalId} -> ${update.status}`, update);
+  
+  // Find the message row by ID if provided, or by externalId
+  const messageRow = update.id 
+    ? document.querySelector(`.message-row[data-id="${update.id}"]`)
+    : document.querySelector(`.message-row[data-external-id="${update.externalId}"]`);
+  
+  if (!messageRow) {
+    console.log(`No UI element found for message ${update.externalId}, may need to refresh view`);
+    return;
+  }
+  
+  // Update the status badge
+  const statusBadge = messageRow.querySelector('.badge.status-SCHEDULED, .badge.status-PENDING, .badge.status-SENDING, .badge.status-SENT, .badge.status-DELIVERED, .badge.status-READ, .badge.status-FAILED, .badge.status-CANCELED');
+  
+  if (statusBadge) {
+    // Remove old status class
+    statusBadge.classList.forEach(cls => {
+      if (cls.startsWith('status-')) {
+        statusBadge.classList.remove(cls);
+      }
+    });
+    
+    // Add new status class and update text
+    statusBadge.classList.add(`status-${update.status.toLowerCase()}`);
+    statusBadge.textContent = update.status;
+  }
+  
+  // Update row class to reflect status
+  messageRow.className = messageRow.className.replace(/scheduled|pending|sending|sent|delivered|read|failed|canceled/g, '');
+  messageRow.classList.add(update.status.toLowerCase());
+  
+  // Update timestamp cell for specific statuses
+  const timestampCell = messageRow.cells[6]; // Sent time column
+  
+  if (timestampCell && (update.status === 'SENT' || update.status === 'DELIVERED' || update.status === 'READ')) {
+    const timestamp = update.timestamp || new Date();
+    timestampCell.textContent = new Date(timestamp).toLocaleString();
+  }
+}
+
+/**
+ * Setup message status update handler
+ */
+function setupMessageStatusUpdates() {
+  // Listen for status updates from the main process
+  window.api.on('message-status-update', updateMessageStatus);
 }

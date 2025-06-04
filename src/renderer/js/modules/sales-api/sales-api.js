@@ -752,7 +752,7 @@ export default class SalesApiModule {
         } else {
           this.selectedContacts.delete(parseInt(checkbox.dataset.id));
         }
-    this.updateSelectAllCheckbox();
+        this.updateSelectAllCheckbox();
         this.updateDeleteSelectedButton();
       });
     });
@@ -1070,7 +1070,7 @@ export default class SalesApiModule {
    * Toggle select all checkboxes
    */
   toggleSelectAll() {
-    const selectAllCheckbox = document.getElementById('select-all-sales');
+    const selectAllCheckbox = document.getElementById('select-all-sales-contacts');
     if (!selectAllCheckbox) return;
     
     console.log('Toggle select all, checked:', selectAllCheckbox.checked);
